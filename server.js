@@ -171,4 +171,5 @@ app.get("/api/admin/export.csv", requireAdmin, async (_req,res) => {
 });
 app.get("/admin", (_req,res)=>res.sendFile(path.join(__dirname,"public","admin.html")));
 app.get("*", (_req,res)=>res.sendFile(path.join(__dirname,"public","index.html")));
-initDb().then(()=>app.listen(PORT,()=>console.log(`Furqan app listening on ${PORT}`))).catch(e=>{console.error(e);process.exit(1);});
+initDb().then(()=>console.log("Furqan app ready")).catch(e=>{console.error(e);});
+module.exports = app
