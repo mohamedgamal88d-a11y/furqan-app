@@ -1,7 +1,7 @@
 {
   "name": "furqan-app",
   "version": "1.0.0",
-  "description": "Al Furqan Center",
+  "description": "Al Furqan Center - Attendance System",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -14,6 +14,7 @@
     "express-session": "^1.18.1",
     "connect-pg-simple": "^10.0.0",
     "pg": "^8.13.1",
-    "bcryptjs": "^2.4.3"
+    "bcryptjs": "^2.4.3",
+    "helmet": "^7.1.0"
   }
 }
