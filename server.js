@@ -1,4 +1,5 @@
 require("dotenv").config();
+
 const express = require("express");
 const session = require("express-session");
 const PgSession = require("connect-pg-simple")(session);
@@ -11,8 +12,22 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const isProd = process.env.NODE_ENV === "production";
 
-if (!process.env.DATABASE_URL) { console.error("Missing DATABASE_URL"); process.exit(1); }
-if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32) { console.error("SESSION_SECRET must be at least 32 chars"); process.exit(1); }
+// أقصى نطاق مسموح به
+const MAX_RADIUS_M = 200;
+const MAX_GPS_ACCURACY_M = 100;
+
+if (!process.env.DATABASE_URL) {
+  console.error("Missing DATABASE_URL");
+  process.exit(1);
+}
+
+if (
+  !process.env.SESSION_SECRET ||
+  process.env.SESSION_SECRET.length < 32
+) {
+  console.error("SESSION_SECRET must be at least 32 chars");
+  process.exit(1);
+}
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -23,216 +38,870 @@ app.set("trust proxy", 1);
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: "30kb" }));
 app.use(express.urlencoded({ extended: false, limit: "30kb" }));
-app.use(session({
-  store: new PgSession({ pool, tableName: "user_sessions", createTableIfMissing: true }),
-  secret: process.env.SESSION_SECRET, resave: false, saveUninitialized: false,
-  cookie: { httpOnly: true, secure: isProd, sameSite: "lax", maxAge: 8 * 60 * 60 * 1000 }
-}));
+
+app.use(
+  session({
+    store: new PgSession({
+      pool,
+      tableName: "user_sessions",
+      createTableIfMissing: true
+    }),
+    secret: process.env.SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: "lax",
+      maxAge: 8 * 60 * 60 * 1000
+    }
+  })
+);
+
 app.use(express.static(path.join(__dirname, "public")));
+
+// ==================== قاعدة البيانات والفروع ====================
 
 async function initDb() {
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS admins (id SERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
-    CREATE TABLE IF NOT EXISTS employees (id SERIAL PRIMARY KEY, code TEXT UNIQUE NOT NULL, name TEXT NOT NULL, pin_hash TEXT NOT NULL, active BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
-    CREATE TABLE IF NOT EXISTS branches (id SERIAL PRIMARY KEY, name TEXT UNIQUE NOT NULL, latitude DOUBLE PRECISION, longitude DOUBLE PRECISION, radius_m INTEGER NOT NULL DEFAULT 300, active BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
-    CREATE TABLE IF NOT EXISTS attendance_logs (id BIGSERIAL PRIMARY KEY, employee_id INTEGER NOT NULL REFERENCES employees(id), branch_id INTEGER NOT NULL REFERENCES branches(id), action_type TEXT NOT NULL CHECK (action_type IN ('حضور','انصراف')), latitude DOUBLE PRECISION NOT NULL, longitude DOUBLE PRECISION NOT NULL, accuracy_m DOUBLE PRECISION, distance_m DOUBLE PRECISION NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+    CREATE TABLE IF NOT EXISTS admins (
+      id SERIAL PRIMARY KEY,
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS employees (
+      id SERIAL PRIMARY KEY,
+      code TEXT UNIQUE NOT NULL,
+      name TEXT NOT NULL,
+      pin_hash TEXT NOT NULL,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS branches (
+      id SERIAL PRIMARY KEY,
+      name TEXT UNIQUE NOT NULL,
+      latitude DOUBLE PRECISION,
+      longitude DOUBLE PRECISION,
+      radius_m INTEGER NOT NULL DEFAULT 200,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS attendance_logs (
+      id BIGSERIAL PRIMARY KEY,
+      employee_id INTEGER NOT NULL REFERENCES employees(id),
+      branch_id INTEGER NOT NULL REFERENCES branches(id),
+      action_type TEXT NOT NULL
+        CHECK (action_type IN ('حضور','انصراف')),
+      latitude DOUBLE PRECISION NOT NULL,
+      longitude DOUBLE PRECISION NOT NULL,
+      accuracy_m DOUBLE PRECISION,
+      distance_m DOUBLE PRECISION NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
   `);
 
   const branchesData = [
-    {name:"أوسكار - المعادي", lat:29.9605, lng:31.2569},
-    {name:"أوسكار - التجمع", lat:30.017, lng:31.425},
-    {name:"أوسكار - مدينة نصر", lat:30.056, lng:31.338},
-    {name:"أوسكار - الماظه", lat:30.079, lng:31.347},
-    {name:"أوسكار - مدينتي", lat:30.083, lng:31.642},
-    {name:"أوسكار - زايد 1", lat:30.007826, lng:30.994215},
-    {name:"أوسكار - زايد ايتابا 2", lat:30.032, lng:31.001},
-    {name:"بنده - المعادي", lat:29.965, lng:31.276},
-    {name:"بنده - مدينة نصر مكرم", lat:30.067, lng:31.343},
-    {name:"بنده - استاد", lat:30.069, lng:31.312},
-    {name:"بنده - الرحاب", lat:30.062, lng:31.493},
-    {name:"بنده - العبور", lat:30.227, lng:31.462},
-    {name:"بنده - اكتوبر", lat:29.962241, lng:30.927698},
-    {name:"بنده - قها", lat:30.283, lng:31.2085},
-    {name:"محلاوي - زايد", lat:30.016, lng:30.985},
-    {name:"محلاوي - عاشر مدينة نصر", lat:30.051, lng:31.356},
-    {name:"محلاوي - مسطرد", lat:30.138, lng:31.285},
-    {name:"محلاوي - منصوره", lat:31.037, lng:31.381},
-    {name:"محلاوي - مارت فيلا", lat:30.028, lng:31.475},
-    {name:"مؤمن وبشار - محكمة", lat:30.092, lng:31.337},
-    {name:"مؤمن وبشار - تسعين شمالي", lat:30.026, lng:31.481},
-    {name:"مؤمن وبشار - اصاله", lat:30.017, lng:31.412},
-    {name:"البركه 1", lat:30.08, lng:31.32},
-    {name:"البركه 2", lat:30.082, lng:31.325},
-    {name:"الحسيني - الرحاب 1", lat:30.0605, lng:31.4935},
-    {name:"الحسيني B11 - مدينتي", lat:30.0855, lng:31.6385},
-    {name:"نيو بني B10", lat:30.145, lng:31.718},
-    {name:"نيو بني B7", lat:30.148, lng:31.72},
-    {name:"سوق القديم - الرحاب", lat:30.06, lng:31.4925},
-    {name:"سوق شرقي 1", lat:30.137, lng:31.708},
-    {name:"سوق شرقي 2", lat:30.138, lng:31.71},
-    {name:"نيو بني نرجس", lat:30.12, lng:31.68},
-    {name:"الحسيني تجمع الاول", lat:30.08, lng:31.48},
-    {name:"A market - الاردنيه", lat:30.3065, lng:31.7405},
-    {name:"A market - بلازا", lat:30.3095, lng:31.7355},
-    {name:"أسواق البدر 70", lat:30.3025, lng:31.7485},
-    {name:"أسواق البدر 43", lat:30.3005, lng:31.7415},
-    {name:"أسواق البدر 50", lat:30.3155, lng:31.742},
-    {name:"العلاف - مج 17 امام مستشفى ابن سينا", lat:30.3012, lng:31.7445},
-    {name:"زون مارت - هرم", lat:29.99, lng:31.14},
-    {name:"زون مارت - المعادي", lat:29.97, lng:31.26},
-    {name:"زون مارت - شيراتون", lat:30.11, lng:31.38},
-    {name:"جولدن - الدائري سلم البارونة", lat:30.0295, lng:31.4105},
-    {name:"داي تو داي", lat:30.05, lng:31.35},
-    {name:"هايبر هب", lat:30.0691875, lng:31.3877656}
+    {name:"A Market - الاردنيه",lat:30.295282,lng:31.745398},
+    {name:"A Market - بلازا",lat:30.280761,lng:31.742033},
+    {name:"اسواق البدر 43",lat:30.307081,lng:31.715857},
+    {name:"اسواق البدر 50",lat:30.306655,lng:31.716577},
+    {name:"اسواق البدر 70",lat:30.318585,lng:31.719398},
+    {name:"أوسكار - التجمع",lat:30.027726,lng:31.488742},
+    {name:"أوسكار - الماظه",lat:30.087325,lng:31.345787},
+    {name:"أوسكار - المعادي",lat:29.961537,lng:31.297026},
+    {name:"أوسكار - زايد",lat:30.007918,lng:30.993985},
+    {name:"أوسكار - زايد اتيابا",lat:30.057582,lng:30.978112},
+    {name:"أوسكار - مدينة نصر",lat:30.052088,lng:31.357359},
+    {name:"أوسكار - مدينتي",lat:30.083393,lng:31.638348},
+    {name:"البركة 1",lat:30.063803,lng:31.467625},
+    {name:"البركة 2",lat:30.048139,lng:31.468779},
+    {name:"الحسيني - الرحاب السوق القديم",lat:30.057701,lng:31.491811},
+    {name:"الحسيني - B11",lat:30.076974,lng:31.657797},
+    {name:"الحسيني - التجمع الاول",lat:30.062331,lng:31.446112},
+    {name:"الحسيني السوق شرقي 1",lat:30.069567,lng:31.518018},
+    {name:"بنده الاستاد (ريكون بلازا)",lat:30.07305,lng:31.315737},
+    {name:"بنده أكتوبر",lat:29.962391,lng:30.927524},
+    {name:"بنده الرحاب",lat:30.064227,lng:31.479744},
+    {name:"بنده العبور",lat:30.232253,lng:31.460268},
+    {name:"بنده المعادي",lat:29.9615,lng:31.247179},
+    {name:"بنده قها",lat:30.352054,lng:31.201187},
+    {name:"بنده مكرم / مدينة نصر مكرم",lat:30.068993,lng:31.342619},
+    {name:"العلاف ماركت 2",lat:30.292717,lng:31.728694},
+    {name:"جولدن",lat:29.983296,lng:31.336955},
+    {name:"داي تو داي",lat:30.057239,lng:31.490938},
+    {name:"زون مارت المعادي",lat:29.981943,lng:31.335668},
+    {name:"زون مارت هرم",lat:30.000398,lng:31.189416},
+    {name:"زون مارت شيراتون",lat:30.100573,lng:31.374993},
+    {name:"نيو بني سوق شرقي",lat:30.06932,lng:31.518787},
+    {name:"مؤمن وبشار فرع اصاله",lat:30.0042,lng:31.494912},
+    {name:"مؤمن وبشار فرع تسعين شمالي",lat:30.030232,lng:31.462105},
+    {name:"مؤمن وبشار فرع المحكمه",lat:30.003863,lng:31.424244},
+    {name:"محلاوي زايد",lat:30.053889,lng:30.986778},
+    {name:"محلاوي عاشر مدينة نصر",lat:30.052702,lng:31.37822},
+    {name:"محلاوي التجمع (مارت فيلا)",lat:30.022777,lng:31.424663},
+    {name:"محلاوي مسطرد",lat:30.12949,lng:31.288471},
+    {name:"محلاوي منصوره",lat:31.05006,lng:31.402882},
+    {name:"نيو بني B10",lat:30.082782,lng:31.65903},
+    {name:"نيو بني B7",lat:30.087701,lng:31.647685},
+    {name:"نيو بني نرجس",lat:30.009146,lng:31.457337},
+    {name:"هايبر هب",lat:30.0692,lng:31.387763},
+    {name:"اكسبشن تجمع الخامس",lat:30.020887,lng:31.434309},
+    {name:"اكسبشن س - حدائق الأهرام",lat:29.953073,lng:31.096543},
+    {name:"اكسبشن ز - حدائق الأهرام",lat:29.980407,lng:31.096933},
+    {name:"اكسبشن مدينتي",lat:30.09011,lng:31.641632}
   ];
+
+  // إضافة الفروع الجديدة فقط.
+  // لا تستبدل الإحداثيات المحفوظة في قاعدة البيانات.
   for (const b of branchesData) {
     await pool.query(
-      `INSERT INTO branches (name, latitude, longitude, radius_m)
-       VALUES ($1, $2, $3, 300)
+      `INSERT INTO branches
+        (name, latitude, longitude, radius_m, active)
+       VALUES ($1,$2,$3,$4,true)
        ON CONFLICT (name) DO NOTHING`,
-      [b.name, b.lat, b.lng]
+      [b.name, b.lat, b.lng, MAX_RADIUS_M]
     );
   }
-  // تحديث اجباري للفرعين اللي كان فيهم مشكلة
-  await pool.query(`UPDATE branches SET latitude=30.007826, longitude=30.994215, radius_m=300 WHERE name='أوسكار - زايد 1'`);
-  await pool.query(`UPDATE branches SET latitude=29.962241, longitude=30.927698, radius_m=300 WHERE name='بنده - اكتوبر'`);
+
+  // تقليل أي نطاق قديم أكبر من 200 متر.
+  await pool.query(
+    "UPDATE branches SET radius_m = $1 WHERE radius_m > $1",
+    [MAX_RADIUS_M]
+  );
+
+  console.log(`Branches checked: ${branchesData.length}`);
 }
 
-function requireAdmin(req, res, next) { if (req.session && req.session.adminId) return next(); return res.status(401).json({ error: "يجب تسجيل دخول الإدارة أولاً." }); }
-function cleanText(v, max=100) { return String(v ?? "").trim().slice(0, max); }
-function distanceMeters(lat1, lon1, lat2, lon2) { const R = 6371000; const rad = x => x * Math.PI / 180; const dLat = rad(lat2-lat1); const dLon = rad(lon2-lon1); const a = Math.sin(dLat/2)**2 + Math.cos(rad(lat1))*Math.cos(rad(lat2))*Math.sin(dLon/2)**2; return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); }
-async function sendTelegram(message) { const token = process.env.TELEGRAM_BOT_TOKEN; const chatId = process.env.TELEGRAM_CHAT_ID; if (!token || !chatId) return; try { await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ chat_id: chatId, text: message }) }); } catch(e){} }
+// ==================== أدوات مساعدة ====================
 
-app.get("/api/health", (_req,res) => res.json({ok:true}));
-app.post("/api/admin/login", async (req, res) => {
-    const username = cleanText(req.body.username, 80);
-    const password = String(req.body.password || "");
-    if (username === "admin" && password === "12345678") {
-        req.session.adminId = 1; req.session.adminUsername = "admin";
-        return res.json({ success: true });
-    }
-    return res.status(401).json({ error: "اسم المستخدم أو كلمة السر غير صحيحة" });
-});
-app.post("/api/admin/logout", requireAdmin, (req,res) => req.session.destroy(() => res.json({ok:true})));
-app.get("/api/admin/me", requireAdmin, (req,res) => res.json({ok:true, username:req.session.adminUsername}));
-app.get("/api/branches", async (_req,res) => { const r = await pool.query("SELECT id,name,active,(latitude IS NOT NULL AND longitude IS NOT NULL) AS configured FROM branches WHERE active=true ORDER BY name"); res.json(r.rows); });
-app.get("/api/attendance/status", async (req,res) => {
-  const code = cleanText(req.query.code, 40);
-  if (!code) return res.json({ hasAttendance: false, hasLeave: false });
-  const r = await pool.query("SELECT action_type FROM attendance_logs l JOIN employees e ON e.id=l.employee_id WHERE e.code=$1 AND l.created_at::date = (NOW() AT TIME ZONE 'Africa/Cairo')::date", [code]);
-  res.json({ hasAttendance: r.rows.some(x => x.action_type === 'حضور'), hasLeave: r.rows.some(x => x.action_type === 'انصراف') });
-});
+function requireAdmin(req, res, next) {
+  if (req.session && req.session.adminId) return next();
 
-app.post("/api/attendance", async (req,res) => {
+  return res.status(401).json({
+    error: "يجب تسجيل دخول الإدارة أولاً."
+  });
+}
+
+function cleanText(v, max = 100) {
+  return String(v ?? "").trim().slice(0, max);
+}
+
+function validCoordinates(lat, lng) {
+  return (
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180
+  );
+}
+
+function distanceMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const rad = x => x * Math.PI / 180;
+  const dLat = rad(lat2 - lat1);
+  const dLon = rad(lon2 - lon1);
+
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(rad(lat1)) *
+      Math.cos(rad(lat2)) *
+      Math.sin(dLon / 2) ** 2;
+
+  return R * 2 * Math.atan2(
+    Math.sqrt(a),
+    Math.sqrt(1 - a)
+  );
+}
+
+async function sendTelegram(message) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+
+  if (!token || !chatId) return;
+
   try {
-    const code = cleanText(req.body.code, 40); const pin = String(req.body.pin || ""); const action = cleanText(req.body.action, 20); const branchId = Number(req.body.branchId);
-    const lat = Number(req.body.latitude), lng = Number(req.body.longitude); const accuracy = Number(req.body.accuracy);
-    if (!code || !pin || !Number.isInteger(branchId) || !["حضور","انصراف"].includes(action)) return res.status(400).json({error:"راجع البيانات"});
-    if (accuracy > 100) return res.status(400).json({error:"دقة الموقع ضعيفة - افتح الـ GPS"});
-    
-    const er = await pool.query("SELECT id,name,pin_hash FROM employees WHERE code=$1 AND active=true", [code]);
-    if (!er.rowCount || !(await bcrypt.compare(pin, er.rows[0].pin_hash))) return res.status(401).json({error:"كود الموظف أو الرقم السري غير صحيح."});
-    
-    const br = await pool.query("SELECT id,name,latitude,longitude,radius_m FROM branches WHERE id=$1 AND active=true", [branchId]);
-    if (!br.rowCount || br.rows[0].latitude === null) return res.status(400).json({error:"الفرع لم يتم ضبط إحداثياته"});
-    
-    const b = br.rows[0]; 
-    const dist = distanceMeters(lat, lng, Number(b.latitude), Number(b.longitude));
-    
-    const todayCheck = await pool.query("SELECT action_type FROM attendance_logs WHERE employee_id=$1 AND created_at::date = (NOW() AT TIME ZONE 'Africa/Cairo')::date", [er.rows[0].id]);
-    const hasAttendanceToday = todayCheck.rows.some(x => x.action_type === 'حضور');
-    const hasLeaveToday = todayCheck.rows.some(x => x.action_type === 'انصراف');
-    
-    if (action === 'حضور' && hasAttendanceToday) return res.status(400).json({ error: "✅ انت سجلت حضور النهاردة خلاص", alreadyDone: true });
-    if (action === 'انصراف' && !hasAttendanceToday) return res.status(400).json({ error: "لازم تسجل حضور الأول" });
-    if (action === 'انصراف' && hasLeaveToday) return res.status(400).json({ error: "✅ انت سجلت انصراف النهاردة خلاص", alreadyDone: true });
-    
-    let autoUpdated = false; 
-    let allowed = false;
+    await fetch(
+      `https://api.telegram.org/bot${token}/sendMessage`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: message
+        })
+      }
+    );
+  } catch (e) {
+    console.error("Telegram notification failed");
+  }
+}
 
-    if (dist <= Number(b.radius_m)) { 
-      allowed = true; 
-    }
-    else if (dist <= 10000) {
-      allowed = true; 
-      autoUpdated = true;
-      await pool.query("UPDATE branches SET latitude=$1, longitude=$2, radius_m=$3 WHERE id=$4", [lat, lng, 300, b.id]);
-    }
+// ==================== الصحة وتسجيل دخول الإدارة ====================
 
-    if (!allowed) return res.status(403).json({error:`خارج النطاق (${Math.round(dist)} متر)`});
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true });
+});
 
-    const saved = await pool.query("INSERT INTO attendance_logs(employee_id,branch_id,action_type,latitude,longitude,accuracy_m,distance_m) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING created_at", [er.rows[0].id, b.id, action, lat, lng, accuracy, Math.round(dist)]);
-    const when = new Date(saved.rows[0].created_at).toLocaleString("ar-EG",{timeZone:"Africa/Cairo"});
-    
-    let msg = `تسجيل ${action}\n${er.rows[0].name} (${code})\n${b.name}\nالمسافة: ${Math.round(dist)}م\n${when}`;
-    if (autoUpdated) msg += `\n\n🔧 تم تحديث موقع الفرع تلقائياً بناءً على أول بصمة ناجحة (300م)`;
-    await sendTelegram(msg);
+app.post("/api/admin/login", async (req, res) => {
+  const username = cleanText(req.body.username, 80);
+  const password = String(req.body.password || "");
 
-    res.json({
-      ok: true, 
-      message: autoUpdated ? `تم تسجيل ${action} وتم تحديث موقع الفرع تلقائياً ✅` : `تم تسجيل ${action} بنجاح.`, 
-      time: when, 
-      autoUpdated 
+  // حافظنا على بيانات الدخول الموجودة في النسخة السابقة.
+  // غيّرها قبل استخدام النظام فعلياً.
+  if (username === "admin" && password === "12345678") {
+    req.session.adminId = 1;
+    req.session.adminUsername = "admin";
+
+    return req.session.save(err => {
+      if (err) {
+        console.error(err);
+        return res.status(500).json({
+          error: "تعذر حفظ جلسة تسجيل الدخول"
+        });
+      }
+
+      res.json({ success: true });
     });
-  } catch(e) { 
-    console.error(e); 
-    res.status(500).json({error:"خطأ داخلي"}); 
+  }
+
+  return res.status(401).json({
+    error: "اسم المستخدم أو كلمة السر غير صحيحة"
+  });
+});
+
+app.post("/api/admin/logout", requireAdmin, (req, res) => {
+  req.session.destroy(() => res.json({ ok: true }));
+});
+
+app.get("/api/admin/me", requireAdmin, (req, res) => {
+  res.json({
+    ok: true,
+    username: req.session.adminUsername
+  });
+});
+
+// ==================== الفروع والحالة اليومية ====================
+
+app.get("/api/branches", async (_req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT id, name, active,
+        (latitude IS NOT NULL AND longitude IS NOT NULL) AS configured
+      FROM branches
+      WHERE active = true
+      ORDER BY name
+    `);
+
+    res.json(r.rows);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "تعذر تحميل الفروع" });
   }
 });
 
-app.get("/api/admin/stats", requireAdmin, async (_req,res) => {
-  const today = await pool.query("SELECT (SELECT COUNT(*) FROM employees WHERE active=true) as total, (SELECT COUNT(DISTINCT employee_id) FROM attendance_logs WHERE action_type='حضور' AND created_at::date = (NOW() AT TIME ZONE 'Africa/Cairo')::date) as present, (SELECT COUNT(DISTINCT employee_id) FROM attendance_logs WHERE action_type='انصراف' AND created_at::date = (NOW() AT TIME ZONE 'Africa/Cairo')::date) as leaved");
-  const t = today.rows[0];
-  const absentList = await pool.query("SELECT e.code, e.name FROM employees e WHERE e.active=true AND e.id NOT IN (SELECT employee_id FROM attendance_logs WHERE action_type='حضور' AND created_at::date = (NOW() AT TIME ZONE 'Africa/Cairo')::date) ORDER BY e.name");
-  res.json({ total: Number(t.total), present: Number(t.present), leaved: Number(t.leaved), absent: Number(t.total)-Number(t.present), absentList: absentList.rows });
+app.get("/api/attendance/status", async (req, res) => {
+  try {
+    const code = cleanText(req.query.code, 40);
+
+    if (!code) {
+      return res.json({
+        hasAttendance: false,
+        hasLeave: false
+      });
+    }
+
+    const r = await pool.query(`
+      SELECT l.action_type
+      FROM attendance_logs l
+      JOIN employees e ON e.id = l.employee_id
+      WHERE e.code = $1
+        AND (l.created_at AT TIME ZONE 'Africa/Cairo')::date
+            = (NOW() AT TIME ZONE 'Africa/Cairo')::date
+    `, [code]);
+
+    res.json({
+      hasAttendance: r.rows.some(x => x.action_type === "حضور"),
+      hasLeave: r.rows.some(x => x.action_type === "انصراف")
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "تعذر تحميل حالة الحضور" });
+  }
 });
 
-app.get("/api/admin/logs", requireAdmin, async (req,res) => {
-  const from = cleanText(req.query.from,10), to = cleanText(req.query.to,10); const params=[], conditions=[];
-  if (/^\d{4}-\d{2}-\d{2}$/.test(from)) { params.push(from); conditions.push(`l.created_at >= $${params.length}::date`); }
-  if (/^\d{4}-\d{2}-\d{2}$/.test(to)) { params.push(to); conditions.push(`l.created_at < ($${params.length}::date + INTERVAL '1 day')`); }
-  const where = conditions.length? "WHERE "+conditions.join(" AND ") : "";
-  const r = await pool.query(`SELECT l.id,e.code,e.name AS employee,b.name AS branch,l.action_type,l.created_at,l.latitude,l.longitude,l.accuracy_m,l.distance_m FROM attendance_logs l JOIN employees e ON e.id=l.employee_id JOIN branches b ON b.id=l.branch_id ${where} ORDER BY l.created_at DESC LIMIT 5000`, params);
-  res.json(r.rows);
+// ==================== تسجيل الحضور والانصراف ====================
+
+app.post("/api/attendance", async (req, res) => {
+  try {
+    const code = cleanText(req.body.code, 40);
+    const pin = String(req.body.pin || "");
+    const action = cleanText(req.body.action, 20);
+    const branchId = Number(req.body.branchId);
+
+    const lat = Number(req.body.latitude);
+    const lng = Number(req.body.longitude);
+    const accuracy = Number(req.body.accuracy);
+
+    if (
+      !code ||
+      !pin ||
+      !Number.isInteger(branchId) ||
+      branchId <= 0 ||
+      !["حضور", "انصراف"].includes(action)
+    ) {
+      return res.status(400).json({
+        error: "راجع بيانات الموظف والفرع ونوع التسجيل"
+      });
+    }
+
+    if (!validCoordinates(lat, lng)) {
+      return res.status(400).json({
+        error: "إحداثيات GPS غير صحيحة. فعّل الموقع وحاول مرة أخرى."
+      });
+    }
+
+    if (
+      !Number.isFinite(accuracy) ||
+      accuracy < 0 ||
+      accuracy > MAX_GPS_ACCURACY_M
+    ) {
+      return res.status(400).json({
+        error: "دقة الموقع ضعيفة. افتح GPS وحاول مرة أخرى."
+      });
+    }
+
+    const er = await pool.query(
+      `SELECT id, name, pin_hash
+       FROM employees
+       WHERE code = $1 AND active = true`,
+      [code]
+    );
+
+    if (
+      !er.rowCount ||
+      !(await bcrypt.compare(pin, er.rows[0].pin_hash))
+    ) {
+      return res.status(401).json({
+        error: "كود الموظف أو الرقم السري غير صحيح."
+      });
+    }
+
+    const br = await pool.query(
+      `SELECT id, name, latitude, longitude, radius_m
+       FROM branches
+       WHERE id = $1 AND active = true`,
+      [branchId]
+    );
+
+    if (
+      !br.rowCount ||
+      br.rows[0].latitude === null ||
+      br.rows[0].longitude === null ||
+      !validCoordinates(
+        Number(br.rows[0].latitude),
+        Number(br.rows[0].longitude)
+      )
+    ) {
+      return res.status(400).json({
+        error: "إحداثيات الفرع غير مضبوطة. تواصل مع الإدارة."
+      });
+    }
+
+    const employee = er.rows[0];
+    const branch = br.rows[0];
+
+    const dist = distanceMeters(
+      lat,
+      lng,
+      Number(branch.latitude),
+      Number(branch.longitude)
+    );
+
+    // الحد الفعلي لا يتجاوز 200 متر حتى لو كانت قيمة قاعدة البيانات أكبر.
+    const radius = Math.min(
+      MAX_RADIUS_M,
+      Math.max(0, Number(branch.radius_m) || 0)
+    );
+
+    if (!Number.isFinite(dist)) {
+      return res.status(400).json({
+        error: "تعذر حساب المسافة. حاول مرة أخرى."
+      });
+    }
+
+    // التحقق من تسجيلات اليوم بتوقيت القاهرة.
+    const todayCheck = await pool.query(`
+      SELECT action_type
+      FROM attendance_logs
+      WHERE employee_id = $1
+        AND (created_at AT TIME ZONE 'Africa/Cairo')::date
+            = (NOW() AT TIME ZONE 'Africa/Cairo')::date
+      FOR SHARE
+    `, [employee.id]);
+
+    const hasAttendanceToday = todayCheck.rows.some(
+      x => x.action_type === "حضور"
+    );
+
+    const hasLeaveToday = todayCheck.rows.some(
+      x => x.action_type === "انصراف"
+    );
+
+    if (action === "حضور" && hasAttendanceToday) {
+      return res.status(400).json({
+        error: "أنت سجلت حضور النهارده بالفعل.",
+        alreadyDone: true
+      });
+    }
+
+    if (action === "انصراف" && !hasAttendanceToday) {
+      return res.status(400).json({
+        error: "لازم تسجل حضور الأول."
+      });
+    }
+
+    if (action === "انصراف" && hasLeaveToday) {
+      return res.status(400).json({
+        error: "أنت سجلت انصراف النهارده بالفعل.",
+        alreadyDone: true
+      });
+    }
+
+    // لا يتم تحديث إحداثيات الفرع بناءً على بصمة الموظف.
+    // لا نقبل أي تسجيل خارج النطاق.
+    if (dist > radius) {
+      return res.status(403).json({
+        error: `أنت خارج نطاق الفرع بمسافة ${Math.round(dist)} متر. الحد الأقصى ${radius} متر.`
+      });
+    }
+
+    const saved = await pool.query(`
+      INSERT INTO attendance_logs
+        (employee_id, branch_id, action_type,
+         latitude, longitude, accuracy_m, distance_m)
+      VALUES ($1,$2,$3,$4,$5,$6,$7)
+      RETURNING created_at
+    `, [
+      employee.id,
+      branch.id,
+      action,
+      lat,
+      lng,
+      accuracy,
+      Math.round(dist)
+    ]);
+
+    const when = new Date(saved.rows[0].created_at)
+      .toLocaleString("ar-EG", {
+        timeZone: "Africa/Cairo"
+      });
+
+    const msg =
+      `تسجيل ${action}\n` +
+      `${employee.name} (${code})\n` +
+      `${branch.name}\n` +
+      `المسافة: ${Math.round(dist)} متر\n` +
+      `${when}`;
+
+    await sendTelegram(msg);
+
+    return res.json({
+      ok: true,
+      message: `تم تسجيل ${action} بنجاح.`,
+      time: when,
+      autoUpdated: false
+    });
+  } catch (e) {
+    console.error("Attendance error:", e);
+
+    return res.status(500).json({
+      error: "حصل خطأ داخلي أثناء تسجيل البصمة."
+    });
+  }
 });
 
-app.get("/api/admin/employees", requireAdmin, async (_req,res) => { const r=await pool.query("SELECT id,code,name,active FROM employees ORDER BY name"); res.json(r.rows); });
-app.post("/api/admin/employees", requireAdmin, async (req,res) => {
-  const code=cleanText(req.body.code,40), name=cleanText(req.body.name,100), pin=String(req.body.pin||"");
-  if (!code ||!name || pin.length<4) return res.status(400).json({error:"أدخل كود الموظف والاسم ورقمًا سريًا لا يقل عن 4"});
-  try { const hash=await bcrypt.hash(pin,12); const r=await pool.query("INSERT INTO employees(code,name,pin_hash) VALUES($1,$2,$3) RETURNING id,code,name,active",[code,name,hash]); res.json(r.rows[0]); }
-  catch(e) { res.status(400).json({error:"كود الموظف مستخدم بالفعل"}); }
-});
-app.patch("/api/admin/employees/:id", requireAdmin, async (req,res) => {
-  const id=Number(req.params.id), active=Boolean(req.body.active);
-  const r=await pool.query("UPDATE employees SET active=$1 WHERE id=$2 RETURNING id,code,name,active",[active,id]);
-  if(!r.rowCount) return res.status(404).json({error:"الموظف غير موجود."}); res.json(r.rows[0]);
-});
-app.post("/api/admin/employees/:id/pin", requireAdmin, async (req,res) => {
-  const id = Number(req.params.id); const pin = String(req.body.pin||"");
-  if(pin.length<4) return res.status(400).json({error:"الرقم السري يجب أن يكون 4 أحرف على الأقل."});
-  const hash = await bcrypt.hash(pin,12); await pool.query("UPDATE employees SET pin_hash=$1 WHERE id=$2",[hash,id]);
-  res.json({ok:true, message:"تم تغيير باسورد الموظف بنجاح"});
+// ==================== إحصائيات الإدارة ====================
+
+app.get("/api/admin/stats", requireAdmin, async (_req, res) => {
+  try {
+    const today = await pool.query(`
+      SELECT
+        (SELECT COUNT(*)
+         FROM employees
+         WHERE active = true) AS total,
+
+        (SELECT COUNT(DISTINCT employee_id)
+         FROM attendance_logs
+         WHERE action_type = 'حضور'
+           AND (created_at AT TIME ZONE 'Africa/Cairo')::date
+               = (NOW() AT TIME ZONE 'Africa/Cairo')::date) AS present,
+
+        (SELECT COUNT(DISTINCT employee_id)
+         FROM attendance_logs
+         WHERE action_type = 'انصراف'
+           AND (created_at AT TIME ZONE 'Africa/Cairo')::date
+               = (NOW() AT TIME ZONE 'Africa/Cairo')::date) AS leaved
+    `);
+
+    const t = today.rows[0];
+
+    const absentList = await pool.query(`
+      SELECT e.code, e.name
+      FROM employees e
+      WHERE e.active = true
+        AND NOT EXISTS (
+          SELECT 1
+          FROM attendance_logs l
+          WHERE l.employee_id = e.id
+            AND l.action_type = 'حضور'
+            AND (l.created_at AT TIME ZONE 'Africa/Cairo')::date
+                = (NOW() AT TIME ZONE 'Africa/Cairo')::date
+        )
+      ORDER BY e.name
+    `);
+
+    res.json({
+      total: Number(t.total),
+      present: Number(t.present),
+      leaved: Number(t.leaved),
+      absent: Number(t.total) - Number(t.present),
+      absentList: absentList.rows
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "تعذر تحميل الإحصائيات" });
+  }
 });
 
-app.get("/api/admin/branches", requireAdmin, async (_req,res) => { const r=await pool.query("SELECT id,name,latitude,longitude,radius_m,active FROM branches ORDER BY name"); res.json(r.rows); });
-app.patch("/api/admin/branches/:id", requireAdmin, async (req,res) => {
-  const name=cleanText(req.body.name,120); const lat=req.body.latitude===""?null:Number(req.body.latitude); const lng=req.body.longitude===""?null:Number(req.body.longitude); const radius=Number(req.body.radius_m);
-  if(!name || radius<30 || radius>10000) return res.status(400).json({error:"بيانات الفرع غلط"});
-  const r=await pool.query("UPDATE branches SET name=$1,latitude=$2,longitude=$3,radius_m=$4,active=$5 WHERE id=$6 RETURNING *", [name,lat,lng,radius,req.body.active!==false,Number(req.params.id)]); res.json(r.rows[0]);
-});
-app.post("/api/admin/branches", requireAdmin, async (req,res) => {
-  const name=cleanText(req.body.name,120); const lat=Number(req.body.latitude); const lng=Number(req.body.longitude); const radius=Number(req.body.radius_m||300);
-  const r=await pool.query("INSERT INTO branches(name,latitude,longitude,radius_m) VALUES($1,$2,$3,$4) RETURNING *",[name,lat,lng,radius]); res.json(r.rows[0]);
+// ==================== سجل البصمات ====================
+
+app.get("/api/admin/logs", requireAdmin, async (req, res) => {
+  try {
+    const from = cleanText(req.query.from, 10);
+    const to = cleanText(req.query.to, 10);
+
+    const params = [];
+    const conditions = [];
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(from)) {
+      params.push(from);
+      conditions.push(
+        `(l.created_at AT TIME ZONE 'Africa/Cairo')::date >= $${params.length}::date`
+      );
+    }
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+      params.push(to);
+      conditions.push(
+        `(l.created_at AT TIME ZONE 'Africa/Cairo')::date <= $${params.length}::date`
+      );
+    }
+
+    const where = conditions.length
+      ? "WHERE " + conditions.join(" AND ")
+      : "";
+
+    const r = await pool.query(`
+      SELECT
+        l.id, e.code, e.name AS employee,
+        b.name AS branch, l.action_type, l.created_at,
+        l.latitude, l.longitude, l.accuracy_m, l.distance_m
+      FROM attendance_logs l
+      JOIN employees e ON e.id = l.employee_id
+      JOIN branches b ON b.id = l.branch_id
+      ${where}
+      ORDER BY l.created_at DESC
+      LIMIT 5000
+    `, params);
+
+    res.json(r.rows);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "تعذر تحميل سجل البصمات" });
+  }
 });
 
-app.get("/api/admin/export.csv", requireAdmin, async (_req,res) => {
-  const r=await pool.query("SELECT e.code,e.name AS employee,b.name AS branch,l.action_type,l.created_at FROM attendance_logs l JOIN employees e ON e.id=l.employee_id JOIN branches b ON b.id=l.branch_id ORDER BY l.created_at DESC");
-  const cols=["code","employee","branch","action_type","created_at"]; const csv=[cols.join(","),...r.rows.map(row=>cols.map(k=>`"${String(row[k]??"").replace(/"/g,'""')}"`).join(","))].join("\r\n");
-  res.setHeader("Content-Type","text/csv; charset=utf-8"); res.setHeader("Content-Disposition",'attachment; filename="furqan-attendance.csv"'); res.send("\uFEFF"+csv);
+// ==================== إدارة الموظفين ====================
+
+app.get("/api/admin/employees", requireAdmin, async (_req, res) => {
+  try {
+    const r = await pool.query(
+      "SELECT id,code,name,active FROM employees ORDER BY name"
+    );
+    res.json(r.rows);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "تعذر تحميل الموظفين" });
+  }
 });
 
-app.get("/admin", (_req,res)=>res.sendFile(path.join(__dirname,"public","admin.html")));
-app.get("*", (_req,res)=>res.sendFile(path.join(__dirname,"public","index.html")));
+app.post("/api/admin/employees", requireAdmin, async (req, res) => {
+  const code = cleanText(req.body.code, 40);
+  const name = cleanText(req.body.name, 100);
+  const pin = String(req.body.pin || "");
 
-initDb().then(()=>app.listen(PORT,()=>console.log(`Furqan app listening on ${PORT}`))).catch(e=>{console.error(e);process.exit(1);});
+  if (!code || !name || pin.length < 4) {
+    return res.status(400).json({
+      error: "أدخل كود الموظف والاسم ورقمًا سريًا لا يقل عن 4 أحرف."
+    });
+  }
+
+  try {
+    const hash = await bcrypt.hash(pin, 12);
+
+    const r = await pool.query(`
+      INSERT INTO employees (code, name, pin_hash)
+      VALUES ($1,$2,$3)
+      RETURNING id,code,name,active
+    `, [code, name, hash]);
+
+    res.json(r.rows[0]);
+  } catch (e) {
+    console.error(e);
+
+    res.status(400).json({
+      error: "كود الموظف مستخدم بالفعل أو تعذر إنشاء الموظف."
+    });
+  }
+});
+
+app.patch("/api/admin/employees/:id", requireAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+
+    if (!Number.isInteger(id) || id <= 0 ||
+        typeof req.body.active !== "boolean") {
+      return res.status(400).json({
+        error: "بيانات الموظف غير صحيحة."
+      });
+    }
+
+    const r = await pool.query(
+      `UPDATE employees SET active = $1
+       WHERE id = $2
+       RETURNING id,code,name,active`,
+      [req.body.active, id]
+    );
+
+    if (!r.rowCount) {
+      return res.status(404).json({ error: "الموظف غير موجود." });
+    }
+
+    res.json(r.rows[0]);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "تعذر تعديل الموظف" });
+  }
+});
+
+app.post("/api/admin/employees/:id/pin", requireAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const pin = String(req.body.pin || "");
+
+    if (!Number.isInteger(id) || id <= 0 || pin.length < 4) {
+      return res.status(400).json({
+        error: "الرقم السري يجب أن يكون 4 أحرف على الأقل."
+      });
+    }
+
+    const hash = await bcrypt.hash(pin, 12);
+
+    const r = await pool.query(
+      "UPDATE employees SET pin_hash=$1 WHERE id=$2",
+      [hash, id]
+    );
+
+    if (!r.rowCount) {
+      return res.status(404).json({ error: "الموظف غير موجود." });
+    }
+
+    res.json({
+      ok: true,
+      message: "تم تغيير الرقم السري للموظف بنجاح."
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "تعذر تغيير الرقم السري" });
+  }
+});
+
+// ==================== إدارة إحداثيات الفروع ====================
+
+app.get("/api/admin/branches", requireAdmin, async (_req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT id,name,latitude,longitude,radius_m,active
+       FROM branches ORDER BY name`
+    );
+
+    res.json(r.rows);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "تعذر تحميل الفروع" });
+  }
+});
+
+app.patch("/api/admin/branches/:id", requireAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const name = cleanText(req.body.name, 120);
+
+    const lat = req.body.latitude === "" ||
+      req.body.latitude == null
+      ? null : Number(req.body.latitude);
+
+    const lng = req.body.longitude === "" ||
+      req.body.longitude == null
+      ? null : Number(req.body.longitude);
+
+    const requestedRadius = Number(req.body.radius_m);
+    const radius = Math.min(MAX_RADIUS_M, requestedRadius);
+
+    if (
+      !Number.isInteger(id) || id <= 0 ||
+      !name ||
+      !Number.isFinite(requestedRadius) ||
+      requestedRadius < 30 ||
+      (lat === null) !== (lng === null) ||
+      (lat !== null && !validCoordinates(lat, lng))
+    ) {
+      return res.status(400).json({
+        error: "بيانات الفرع أو الإحداثيات غير صحيحة."
+      });
+    }
+
+    const r = await pool.query(`
+      UPDATE branches
+      SET name=$1, latitude=$2, longitude=$3,
+          radius_m=$4, active=$5
+      WHERE id=$6
+      RETURNING *
+    `, [
+      name,
+      lat,
+      lng,
+      radius,
+      req.body.active !== false,
+      id
+    ]);
+
+    if (!r.rowCount) {
+      return res.status(404).json({ error: "الفرع غير موجود." });
+    }
+
+    res.json(r.rows[0]);
+  } catch (e) {
+    console.error(e);
+    res.status(400).json({
+      error: "تعذر تعديل الفرع. تأكد من عدم تكرار اسم فرع آخر."
+    });
+  }
+});
+
+app.post("/api/admin/branches", requireAdmin, async (req, res) => {
+  try {
+    const name = cleanText(req.body.name, 120);
+    const lat = Number(req.body.latitude);
+    const lng = Number(req.body.longitude);
+    const requestedRadius = Number(req.body.radius_m || MAX_RADIUS_M);
+
+    if (
+      !name ||
+      !validCoordinates(lat, lng) ||
+      !Number.isFinite(requestedRadius) ||
+      requestedRadius < 30
+    ) {
+      return res.status(400).json({
+        error: "أدخل اسم الفرع وإحداثيات صحيحة ونطاقًا لا يقل عن 30 مترًا."
+      });
+    }
+
+    const radius = Math.min(MAX_RADIUS_M, requestedRadius);
+
+    const r = await pool.query(`
+      INSERT INTO branches
+        (name,latitude,longitude,radius_m)
+      VALUES ($1,$2,$3,$4)
+      RETURNING *
+    `, [name, lat, lng, radius]);
+
+    res.json(r.rows[0]);
+  } catch (e) {
+    console.error(e);
+    res.status(400).json({
+      error: "تعذر إضافة الفرع. ربما الاسم مستخدم بالفعل."
+    });
+  }
+});
+
+// ==================== تصدير Excel/CSV ====================
+
+app.get("/api/admin/export.csv", requireAdmin, async (_req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT
+        e.code, e.name AS employee, b.name AS branch,
+        l.action_type, l.created_at
+      FROM attendance_logs l
+      JOIN employees e ON e.id = l.employee_id
+      JOIN branches b ON b.id = l.branch_id
+      ORDER BY l.created_at DESC
+    `);
+
+    const cols = [
+      "code", "employee", "branch",
+      "action_type", "created_at"
+    ];
+
+    const csv = [
+      cols.join(","),
+      ...r.rows.map(row =>
+        cols.map(k =>
+          `"${String(row[k] ?? "").replace(/"/g, '""')}"`
+        ).join(",")
+      )
+    ].join("\r\n");
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      'attachment; filename="furqan-attendance.csv"'
+    );
+
+    res.send("\uFEFF" + csv);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "تعذر تصدير السجل" });
+  }
+});
+
+// ==================== الصفحات ====================
+
+app.get("/admin", (_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "admin.html"));
+});
+
+app.get("*", (_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+// ==================== تشغيل السيرفر ====================
+
+initDb()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Furqan app listening on ${PORT}`);
+      console.log(`Maximum attendance radius: ${MAX_RADIUS_M} meters`);
+    });
+  })
+  .catch(e => {
+    console.error("Database initialization failed:", e);
+    process.exit(1);
+  });
