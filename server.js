@@ -1,5 +1,4 @@
 require("dotenv").config();
-
 const express = require("express");
 const session = require("express-session");
 const PgSession = require("connect-pg-simple")(session);
@@ -16,6 +15,7 @@ const MAX_RADIUS_M = 200;
 const MAX_GPS_ACCURACY_M = 100;
 const WORK_START_HOUR = 9;
 const WORK_END_HOUR = 17;
+const SHIFT_SECONDS = 8 * 3600;
 
 if (!process.env.DATABASE_URL) {
   console.error("Missing DATABASE_URL");
@@ -173,17 +173,36 @@ function distanceMeters(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 function getCairoTimeParts(date = new Date()) {
-  const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'Africa/Cairo', hour: '2-digit', minute: '2-digit', hour12: false });
+  const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'Africa/Cairo', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
   const parts = fmt.formatToParts(date);
   const hour = parseInt(parts.find(p => p.type === 'hour').value);
   const minute = parseInt(parts.find(p => p.type === 'minute').value);
-  return { hour, minute };
+  const second = parseInt(parts.find(p => p.type === 'second').value);
+  return { hour, minute, second };
 }
 function calculateLateMinutes() {
   const { hour, minute } = getCairoTimeParts(new Date());
   if (hour < WORK_START_HOUR) return 0;
   if (hour === WORK_START_HOUR && minute === 0) return 0;
   return (hour - WORK_START_HOUR) * 60 + minute;
+}
+function formatHMS(totalSeconds) {
+  if (!totalSeconds || totalSeconds < 0) return "00:00:00";
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = Math.floor(totalSeconds % 60);
+  return String(h).padStart(2,'0')+":"+String(m).padStart(2,'0')+":"+String(s).padStart(2,'0');
+}
+function toCairoParts(d) {
+  if(!d) return null;
+  const dt = new Date(d);
+  const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'Africa/Cairo', hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  const parts = fmt.formatToParts(dt);
+  return {
+    h: parseInt(parts.find(p=>p.type==='hour').value),
+    m: parseInt(parts.find(p=>p.type==='minute').value),
+    s: parseInt(parts.find(p=>p.type==='second').value),
+  };
 }
 async function sendTelegram(message) {
   const token = process.env.TELEGRAM_BOT_TOKEN; const chatId = process.env.TELEGRAM_CHAT_ID;
@@ -316,86 +335,79 @@ app.post("/api/admin/employees/:id/pin", requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: "تعذر تغيير الرقم السري" }); }
 });
 
-// ==================== تقرير شهري متظبط 100% بالدقايق والثواني ====================
+// ==================== تقرير شهري متظبط 100% يوم بيوم - FIXED ====================
 app.get("/api/admin/reports/monthly", requireAdmin, async (req, res) => {
   try {
     const month = cleanText(req.query.month, 7);
     if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: "صيغة الشهر غير صحيحة YYYY-MM" });
-    
     const r = await pool.query(`
       WITH daily AS (
-        SELECT
-          e.id as employee_id,
-          e.code,
-          e.name,
-          e.salary,
+        SELECT e.id as employee_id, e.code, e.name, e.salary,
           (l.created_at AT TIME ZONE 'Africa/Cairo')::date as work_date,
           MIN(l.created_at) FILTER (WHERE l.action_type='حضور') as first_in,
-          MAX(l.created_at) FILTER (WHERE l.action_type='انصراف') as last_out,
-          MAX(l.late_minutes) FILTER (WHERE l.action_type='حضور') as late_minutes_day
+          MAX(l.created_at) FILTER (WHERE l.action_type='انصراف') as last_out
         FROM employees e
-        LEFT JOIN attendance_logs l ON l.employee_id = e.id 
-          AND to_char(l.created_at AT TIME ZONE 'Africa/Cairo', 'YYYY-MM') = $1
-        WHERE e.active = true
-        GROUP BY e.id, e.code, e.name, e.salary, work_date
+        LEFT JOIN attendance_logs l ON l.employee_id = e.id AND to_char(l.created_at AT TIME ZONE 'Africa/Cairo', 'YYYY-MM') = $1
+        WHERE e.active = true GROUP BY e.id, e.code, e.name, e.salary, work_date
       )
-      SELECT 
-        employee_id as id, code, name, salary,
-        COUNT(work_date) as present_days,
-        COALESCE(SUM(late_minutes_day),0) as total_late_minutes,
-        COUNT(*) FILTER (WHERE late_minutes_day > 0) as late_days,
+      SELECT employee_id as id, code, name, salary, COUNT(work_date) as present_days,
         COALESCE(SUM(EXTRACT(EPOCH FROM (last_out - first_in))),0) as total_work_seconds,
-        json_agg(
-          json_build_object(
-            'date', work_date,
-            'in', first_in,
-            'out', last_out,
-            'late', late_minutes_day,
-            'seconds', EXTRACT(EPOCH FROM (last_out - first_in))
-          ) ORDER BY work_date
-        ) FILTER (WHERE work_date IS NOT NULL) as daily_details
-      FROM daily
-      GROUP BY employee_id, code, name, salary
-      ORDER BY name
+        json_agg(json_build_object('date', work_date, 'first_in', first_in, 'last_out', last_out) ORDER BY work_date) FILTER (WHERE work_date IS NOT NULL) as daily_details
+      FROM daily GROUP BY employee_id, code, name, salary ORDER BY name
     `, [month]);
 
-    const formatHMS = (totalSeconds) => {
-      if (!totalSeconds || totalSeconds < 0) return "00:00:00";
-      const h = Math.floor(totalSeconds / 3600);
-      const m = Math.floor((totalSeconds % 3600) / 60);
-      const s = Math.floor(totalSeconds % 60);
-      return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-    };
-
     const data = r.rows.map(row => {
-      const totalSeconds = parseFloat(row.total_work_seconds) || 0;
-      const totalLateSeconds = (parseInt(row.total_late_minutes) || 0) * 60;
-      const netSeconds = Math.max(0, totalSeconds - totalLateSeconds);
-      const totalHoursDecimal = parseFloat((totalSeconds / 3600).toFixed(2));
-      const salary = parseFloat(row.salary) || 0;
-      const dailyRate = salary / 30;
-      const hourlyRate = dailyRate / 8;
-      const minuteRate = hourlyRate / 60;
-      const totalMinutes = Math.floor(totalSeconds / 60);
-      const deserved = totalMinutes * minuteRate;
-
+      let totalLateSeconds = 0, totalShortageSeconds = 0, lateDays = 0;
+      const daily = (row.daily_details || []).map(d => {
+        const firstIn = d.first_in ? new Date(d.first_in) : null;
+        const lastOut = d.last_out ? new Date(d.last_out) : null;
+        const inP = toCairoParts(firstIn);
+        const outP = toCairoParts(lastOut);
+        let lateInSec = 0;
+        if(inP){ if(inP.h > WORK_START_HOUR) lateInSec = (inP.h-WORK_START_HOUR)*3600+inP.m*60+inP.s; else if(inP.h===WORK_START_HOUR) lateInSec = inP.m*60+inP.s; }
+        let earlyOutSec = 0;
+        if(outP){ if(outP.h < WORK_END_HOUR) earlyOutSec = (WORK_END_HOUR-outP.h)*3600-outP.m*60-outP.s; }
+        let workSec = 0;
+        if(firstIn && lastOut) workSec = Math.max(0, Math.floor((lastOut-firstIn)/1000));
+        let shortage = workSec>0 ? Math.max(0, SHIFT_SECONDS-workSec) : (firstIn?SHIFT_SECONDS:0);
+        if(lateInSec>0||earlyOutSec>0||shortage>0) lateDays++;
+        totalLateSeconds+=lateInSec; totalShortageSeconds+=shortage;
+        return {
+          date: d.date,
+          in: firstIn?firstIn.toLocaleString('ar-EG',{timeZone:'Africa/Cairo'}):null,
+          out: lastOut?lastOut.toLocaleString('ar-EG',{timeZone:'Africa/Cairo'}):null,
+          late: lateInSec>0?Math.floor(lateInSec/60):0,
+          lateInSeconds: lateInSec,
+          lateInHMS: formatHMS(lateInSec),
+          earlyOutSeconds: earlyOutSec,
+          earlyOutHMS: formatHMS(earlyOutSec),
+          seconds: workSec,
+          hours_hms: formatHMS(workSec),
+          shortageSeconds: shortage,
+          shortageHMS: formatHMS(shortage),
+          hours_decimal: workSec?parseFloat((workSec/3600).toFixed(2)):0
+        };
+      });
+      daily.sort((a,b)=> new Date(a.date)-new Date(b.date));
+      const totalSeconds = parseFloat(row.total_work_seconds)||0;
+      const salary = parseFloat(row.salary)||0;
+      const dailyRate=salary/30, hourlyRate=dailyRate/8, minuteRate=hourlyRate/60;
       return {
         ...row,
         total_work_seconds: totalSeconds,
-        total_work_hours: totalHoursDecimal,
+        total_work_hours: parseFloat((totalSeconds/3600).toFixed(2)),
         total_work_hms: formatHMS(totalSeconds),
+        total_late_seconds: totalLateSeconds,
         total_late_hms: formatHMS(totalLateSeconds),
-        net_work_hms: formatHMS(netSeconds),
-        daily_details: (row.daily_details || []).map(d => ({
-          ...d,
-          hours_hms: formatHMS(d.seconds),
-          hours_decimal: d.seconds ? parseFloat((d.seconds/3600).toFixed(2)) : 0
-        })),
-        rates: { daily: dailyRate.toFixed(2), hourly: hourlyRate.toFixed(2), per_minute: minuteRate.toFixed(4) },
-        deserved_salary: parseFloat(deserved.toFixed(2))
+        total_shortage_seconds: totalShortageSeconds,
+        total_shortage_hms: formatHMS(totalShortageSeconds),
+        present_days: parseInt(row.present_days)||0,
+        late_days: lateDays,
+        daily_details: daily,
+        deserved_salary: parseFloat((Math.floor(totalSeconds/60)*minuteRate).toFixed(2)),
+        total_late_minutes: Math.floor(totalShortageSeconds/60)
       };
     });
-    
     res.json({ month, workConfig: { start: WORK_START_HOUR, end: WORK_END_HOUR, hours: 8 }, data });
   } catch (e) { console.error(e); res.status(500).json({ error: "تعذر تحميل التقرير الشهري" }); }
 });
