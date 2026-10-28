@@ -438,11 +438,33 @@ app.post("/api/admin/branches", requireAdmin, async (req, res) => {
 });
 app.get("/api/admin/export.csv", requireAdmin, async (_req, res) => {
   try {
-    const r = await pool.query(`SELECT e.code, e.name AS employee, b.name AS branch, l.action_type, l.created_at, l.late_minutes, l.work_hours FROM attendance_logs l JOIN employees e ON e.id = l.employee_id JOIN branches b ON b.id = l.branch_id ORDER BY l.created_at DESC`);
-    const cols = ["code", "employee", "branch", "action_type", "created_at", "late_minutes", "work_hours"];
-    const csv = [cols.join(","), ...r.rows.map(row => cols.map(k => `"${String(row[k] ?? "").replace(/"/g, '""')}"`).join(","))].join("\r\n");
-    res.setHeader("Content-Type", "text/csv; charset=utf-8"); res.setHeader("Content-Disposition", 'attachment; filename="furqan-attendance.csv"'); res.send("\uFEFF" + csv);
-  } catch (e) { res.status(500).json({ error: "تعذر تصدير السجل" }); }
+    const r = await pool.query(`
+      SELECT 
+        e.code as "كود الموظف",
+        e.name AS "اسم الموظف",
+        b.name AS "الفرع",
+        l.action_type AS "نوع التسجيل",
+        (l.created_at AT TIME ZONE 'Africa/Cairo')::text AS "التاريخ والوقت",
+        l.late_minutes AS "تأخير دقايق",
+        l.work_hours AS "ساعات عمل",
+        l.distance_m AS "المسافة"
+      FROM attendance_logs l 
+      JOIN employees e ON e.id = l.employee_id 
+      JOIN branches b ON b.id = l.branch_id 
+      ORDER BY l.created_at DESC
+    `);
+    if(!r.rows.length) return res.status(404).send("مفيش بيانات");
+    const cols = Object.keys(r.rows[0]);
+    const header = cols.join(";");
+    const csvRows = r.rows.map(row => cols.map(k => `"${String(row[k] ?? "").replace(/"/g, '""')}"`).join(";")).join("\r\n");
+    const csv = "sep=;\r\n" + header + "\r\n" + csvRows;
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", 'attachment; filename="furqan-attendance.csv"');
+    res.send("\uFEFF" + csv);
+  } catch (e) { 
+    console.error(e);
+    res.status(500).json({ error: "تعذر تصدير السجل" }); 
+  }
 });
 app.get("/admin", (_req, res) => { res.sendFile(path.join(__dirname, "public", "admin.html")); });
 app.get("*", (_req, res) => { res.sendFile(path.join(__dirname, "public", "index.html")); });
