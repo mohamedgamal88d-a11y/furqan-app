@@ -348,7 +348,7 @@ app.post("/api/admin/employees/:id/pin", requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: "تعذر تغيير الرقم السري" }); }
 });
 
-// ==================== تقرير شهري FIXED - بدون Invalid Date ====================
+// ==================== تقرير شهري FIXED - الصافي = الإجمالي الصحيح بدون خصم مزدوج ====================
 app.get("/api/admin/reports/monthly", requireAdmin, async (req, res) => {
   try {
     const month = cleanText(req.query.month, 7);
@@ -373,21 +373,21 @@ app.get("/api/admin/reports/monthly", requireAdmin, async (req, res) => {
     `, [month]);
 
     const data = r.rows.map(row => {
-      let totalLateSeconds = 0, totalShortageSeconds = 0, lateDays = 0;
+      let totalLateSeconds = 0;
+      let lateDays = 0;
       const daily = (row.daily_details || []).map(d => {
         const firstIn = d.first_in ? new Date(d.first_in) : null;
         const lastOut = d.last_out ? new Date(d.last_out) : null;
         const inP = toCairoParts(firstIn);
-        const outP = toCairoParts(lastOut);
         let lateInSec = 0;
-        if(inP){ if(inP.h > WORK_START_HOUR) lateInSec = (inP.h-WORK_START_HOUR)*3600+inP.m*60+inP.s; else if(inP.h===WORK_START_HOUR) lateInSec = inP.m*60+inP.s; }
-        let earlyOutSec = 0;
-        if(outP){ if(outP.h < WORK_END_HOUR) earlyOutSec = (WORK_END_HOUR-outP.h)*3600-outP.m*60-outP.s; }
+        if(inP){
+          if(inP.h > WORK_START_HOUR) lateInSec = (inP.h-WORK_START_HOUR)*3600+inP.m*60+inP.s;
+          else if(inP.h===WORK_START_HOUR) lateInSec = inP.m*60+inP.s;
+        }
         let workSec = 0;
         if(firstIn && lastOut) workSec = Math.max(0, Math.floor((lastOut-firstIn)/1000));
-        let shortage = workSec>0 ? Math.max(0, SHIFT_SECONDS-workSec) : (firstIn?SHIFT_SECONDS:0);
         if(lateInSec>0) lateDays++;
-        totalLateSeconds+=lateInSec; totalShortageSeconds+=shortage;
+        totalLateSeconds+=lateInSec;
         
         return {
           date: d.date,
@@ -414,29 +414,36 @@ app.get("/api/admin/reports/monthly", requireAdmin, async (req, res) => {
       
       const totalSeconds = parseFloat(row.total_work_seconds)||0;
       const salary = parseFloat(row.salary)||0;
-      const dailyRate=salary/30, hourlyRate=dailyRate/8, minuteRate=hourlyRate/60;
-      const netSeconds = Math.max(0, totalSeconds - totalLateSeconds - totalShortageSeconds);
+      const dailyRate = salary/30;
+      const hourlyRate = dailyRate/8;
+      const minuteRate = hourlyRate/60;
       
+      // FIX: الصافي = الإجمالي - بدون خصم مزدوج للعجز
+      const netSeconds = totalSeconds;
+
       return {
         ...row,
         total_work_seconds: totalSeconds,
         total_work_hms: formatHMS(totalSeconds),
+        total_work_hours: parseFloat((totalSeconds/3600).toFixed(2)),
         net_work_hms: formatHMS(netSeconds),
+        net_work_seconds: netSeconds,
         total_late_seconds: totalLateSeconds,
         total_late_hms: formatHMS(totalLateSeconds),
-        total_shortage_hms: formatHMS(totalShortageSeconds),
+        total_late_minutes: Math.floor(totalLateSeconds/60),
+        total_shortage_hms: "00:00:00",
         present_days: parseInt(row.present_days)||0,
         late_days: lateDays,
         daily_details: daily,
+        rates: { per_minute: parseFloat(minuteRate.toFixed(2)), per_hour: parseFloat(hourlyRate.toFixed(2)), per_day: parseFloat(dailyRate.toFixed(2)) },
         deserved_salary: parseFloat((Math.floor(totalSeconds/60)*minuteRate).toFixed(2)),
         net_salary: parseFloat((Math.floor(netSeconds/60)*minuteRate).toFixed(2)),
         صافي: parseFloat((Math.floor(netSeconds/60)*minuteRate).toFixed(2)),
         مستحق: parseFloat((Math.floor(totalSeconds/60)*minuteRate).toFixed(2)),
-        إجمالي: formatHMS(totalSeconds),
-        total_late_minutes: Math.floor(totalLateSeconds/60)
+        إجمالي: formatHMS(totalSeconds)
       };
     });
-    res.json({ month, workConfig: { start: WORK_START_HOUR, end: WORK_END_HOUR, hours: 8 }, data });
+    res.json({ month, workConfig: { start: `${WORK_START_HOUR}:00`, end: `${WORK_END_HOUR}:00`, hours: 8 }, data });
   } catch (e) { console.error(e); res.status(500).json({ error: "تعذر تحميل التقرير الشهري" }); }
 });
 
