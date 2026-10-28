@@ -211,7 +211,9 @@ async function sendTelegram(message) {
     await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text: message }) });
   } catch (e) { console.error("Telegram notification failed"); }
 }
+
 app.get("/api/health", (_req, res) => { res.json({ ok: true }); });
+
 app.post("/api/admin/login", async (req, res) => {
   const username = cleanText(req.body.username, 80); const password = String(req.body.password || "");
   if (username === "admin" && password === "12345678") {
@@ -223,14 +225,17 @@ app.post("/api/admin/login", async (req, res) => {
   }
   return res.status(401).json({ error: "اسم المستخدم أو كلمة السر غير صحيحة" });
 });
+
 app.post("/api/admin/logout", requireAdmin, (req, res) => { req.session.destroy(() => res.json({ ok: true })); });
 app.get("/api/admin/me", requireAdmin, (req, res) => { res.json({ ok: true, username: req.session.adminUsername }); });
+
 app.get("/api/branches", async (_req, res) => {
   try {
     const r = await pool.query(`SELECT id, name, active, (latitude IS NOT NULL AND longitude IS NOT NULL) AS configured FROM branches WHERE active = true ORDER BY name`);
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: "تعذر تحميل الفروع" }); }
 });
+
 app.get("/api/attendance/status", async (req, res) => {
   try {
     const code = cleanText(req.query.code, 40);
@@ -239,6 +244,7 @@ app.get("/api/attendance/status", async (req, res) => {
     res.json({ hasAttendance: r.rows.some(x => x.action_type === "حضور"), hasLeave: r.rows.some(x => x.action_type === "انصراف") });
   } catch (e) { res.status(500).json({ error: "تعذر تحميل حالة الحضور" }); }
 });
+
 app.post("/api/attendance", async (req, res) => {
   try {
     const code = cleanText(req.body.code, 40); const pin = String(req.body.pin || ""); const action = cleanText(req.body.action, 20); const branchId = Number(req.body.branchId);
@@ -276,6 +282,7 @@ app.post("/api/attendance", async (req, res) => {
     return res.json({ ok: true, message: `تم تسجيل ${action} بنجاح.` + (lateMinutes > 0 ? ` متأخر ${lateMinutes} دقيقة.` : ''), time: when, autoUpdated: false, lateMinutes, workHours });
   } catch (e) { console.error("Attendance error:", e); return res.status(500).json({ error: "حصل خطأ داخلي أثناء تسجيل البصمة." }); }
 });
+
 app.get("/api/admin/stats", requireAdmin, async (_req, res) => {
   try {
     const today = await pool.query(`SELECT (SELECT COUNT(*) FROM employees WHERE active = true) AS total, (SELECT COUNT(DISTINCT employee_id) FROM attendance_logs WHERE action_type = 'حضور' AND (created_at AT TIME ZONE 'Africa/Cairo')::date = (NOW() AT TIME ZONE 'Africa/Cairo')::date) AS present, (SELECT COUNT(DISTINCT employee_id) FROM attendance_logs WHERE action_type = 'انصراف' AND (created_at AT TIME ZONE 'Africa/Cairo')::date = (NOW() AT TIME ZONE 'Africa/Cairo')::date) AS leaved`);
@@ -284,6 +291,7 @@ app.get("/api/admin/stats", requireAdmin, async (_req, res) => {
     res.json({ total: Number(t.total), present: Number(t.present), leaved: Number(t.leaved), absent: Number(t.total) - Number(t.present), absentList: absentList.rows });
   } catch (e) { res.status(500).json({ error: "تعذر تحميل الإحصائيات" }); }
 });
+
 app.get("/api/admin/logs", requireAdmin, async (req, res) => {
   try {
     const from = cleanText(req.query.from, 10); const to = cleanText(req.query.to, 10); const params = []; const conditions = [];
@@ -294,9 +302,11 @@ app.get("/api/admin/logs", requireAdmin, async (req, res) => {
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: "تعذر تحميل سجل البصمات" }); }
 });
+
 app.get("/api/admin/employees", requireAdmin, async (_req, res) => {
   try { const r = await pool.query("SELECT id,code,name,active,salary FROM employees ORDER BY name"); res.json(r.rows); } catch (e) { res.status(500).json({ error: "تعذر تحميل الموظفين" }); }
 });
+
 app.post("/api/admin/employees", requireAdmin, async (req, res) => {
   const code = cleanText(req.body.code, 40); const name = cleanText(req.body.name, 100); const pin = String(req.body.pin || ""); const salary = Number(req.body.salary) || 0;
   if (!code || !name || pin.length < 4) return res.status(400).json({ error: "أدخل كود الموظف والاسم ورقمًا سريًا لا يقل عن 4 أحرف." });
@@ -306,6 +316,7 @@ app.post("/api/admin/employees", requireAdmin, async (req, res) => {
     res.json(r.rows[0]);
   } catch (e) { res.status(400).json({ error: "كود الموظف مستخدم بالفعل أو تعذر إنشاء الموظف." }); }
 });
+
 app.patch("/api/admin/employees/:id", requireAdmin, async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -315,6 +326,7 @@ app.patch("/api/admin/employees/:id", requireAdmin, async (req, res) => {
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: "تعذر تعديل الموظف" }); }
 });
+
 app.patch("/api/admin/employees/:id/salary", requireAdmin, async (req, res) => {
   try {
     const id = Number(req.params.id); const salary = Number(req.body.salary);
@@ -324,6 +336,7 @@ app.patch("/api/admin/employees/:id/salary", requireAdmin, async (req, res) => {
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: "تعذر تعديل المرتب" }); }
 });
+
 app.post("/api/admin/employees/:id/pin", requireAdmin, async (req, res) => {
   try {
     const id = Number(req.params.id); const pin = String(req.body.pin || "");
@@ -335,24 +348,27 @@ app.post("/api/admin/employees/:id/pin", requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: "تعذر تغيير الرقم السري" }); }
 });
 
-// ==================== تقرير شهري متظبط 100% يوم بيوم - FIXED ====================
+// ==================== تقرير شهري FIXED - بدون Invalid Date ====================
 app.get("/api/admin/reports/monthly", requireAdmin, async (req, res) => {
   try {
     const month = cleanText(req.query.month, 7);
     if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: "صيغة الشهر غير صحيحة YYYY-MM" });
+    
     const r = await pool.query(`
       WITH daily AS (
         SELECT e.id as employee_id, e.code, e.name, e.salary,
           (l.created_at AT TIME ZONE 'Africa/Cairo')::date as work_date,
           MIN(l.created_at) FILTER (WHERE l.action_type='حضور') as first_in,
-          MAX(l.created_at) FILTER (WHERE l.action_type='انصراف') as last_out
+          MAX(l.created_at) FILTER (WHERE l.action_type='انصراف') as last_out,
+          to_char(MIN(l.created_at) AT TIME ZONE 'Africa/Cairo', 'HH24:MI:SS') as first_in_cairo,
+          to_char(MAX(l.created_at) AT TIME ZONE 'Africa/Cairo', 'HH24:MI:SS') as last_out_cairo
         FROM employees e
         LEFT JOIN attendance_logs l ON l.employee_id = e.id AND to_char(l.created_at AT TIME ZONE 'Africa/Cairo', 'YYYY-MM') = $1
         WHERE e.active = true GROUP BY e.id, e.code, e.name, e.salary, work_date
       )
       SELECT employee_id as id, code, name, salary, COUNT(work_date) as present_days,
         COALESCE(SUM(EXTRACT(EPOCH FROM (last_out - first_in))),0) as total_work_seconds,
-        json_agg(json_build_object('date', work_date, 'first_in', first_in, 'last_out', last_out) ORDER BY work_date) FILTER (WHERE work_date IS NOT NULL) as daily_details
+        json_agg(json_build_object('date', work_date, 'first_in', first_in, 'last_out', last_out, 'first_in_cairo', first_in_cairo, 'last_out_cairo', last_out_cairo) ORDER BY work_date) FILTER (WHERE work_date IS NOT NULL) as daily_details
       FROM daily GROUP BY employee_id, code, name, salary ORDER BY name
     `, [month]);
 
@@ -370,42 +386,54 @@ app.get("/api/admin/reports/monthly", requireAdmin, async (req, res) => {
         let workSec = 0;
         if(firstIn && lastOut) workSec = Math.max(0, Math.floor((lastOut-firstIn)/1000));
         let shortage = workSec>0 ? Math.max(0, SHIFT_SECONDS-workSec) : (firstIn?SHIFT_SECONDS:0);
-        if(lateInSec>0||earlyOutSec>0||shortage>0) lateDays++;
+        if(lateInSec>0) lateDays++;
         totalLateSeconds+=lateInSec; totalShortageSeconds+=shortage;
+        
         return {
           date: d.date,
-          in: firstIn?firstIn.toLocaleString('ar-EG',{timeZone:'Africa/Cairo'}):null,
-          out: lastOut?lastOut.toLocaleString('ar-EG',{timeZone:'Africa/Cairo'}):null,
+          work_date: d.date,
+          first_in: d.first_in,
+          last_out: d.last_out,
+          first_in_cairo: d.first_in_cairo,
+          last_out_cairo: d.last_out_cairo,
+          حضور: d.first_in_cairo || '--',
+          انصراف: d.last_out_cairo || '--',
+          in: d.first_in_cairo,
+          out: d.last_out_cairo,
+          inT: d.first_in_cairo,
+          outT: d.last_out_cairo,
           late: lateInSec>0?Math.floor(lateInSec/60):0,
           lateInSeconds: lateInSec,
           lateInHMS: formatHMS(lateInSec),
-          earlyOutSeconds: earlyOutSec,
-          earlyOutHMS: formatHMS(earlyOutSec),
           seconds: workSec,
           hours_hms: formatHMS(workSec),
-          shortageSeconds: shortage,
-          shortageHMS: formatHMS(shortage),
+          hours: formatHMS(workSec),
           hours_decimal: workSec?parseFloat((workSec/3600).toFixed(2)):0
         };
       });
-      daily.sort((a,b)=> new Date(a.date)-new Date(b.date));
+      
       const totalSeconds = parseFloat(row.total_work_seconds)||0;
       const salary = parseFloat(row.salary)||0;
       const dailyRate=salary/30, hourlyRate=dailyRate/8, minuteRate=hourlyRate/60;
+      const netSeconds = Math.max(0, totalSeconds - totalLateSeconds - totalShortageSeconds);
+      
       return {
         ...row,
         total_work_seconds: totalSeconds,
-        total_work_hours: parseFloat((totalSeconds/3600).toFixed(2)),
         total_work_hms: formatHMS(totalSeconds),
+        net_work_hms: formatHMS(netSeconds),
         total_late_seconds: totalLateSeconds,
         total_late_hms: formatHMS(totalLateSeconds),
-        total_shortage_seconds: totalShortageSeconds,
         total_shortage_hms: formatHMS(totalShortageSeconds),
         present_days: parseInt(row.present_days)||0,
         late_days: lateDays,
         daily_details: daily,
         deserved_salary: parseFloat((Math.floor(totalSeconds/60)*minuteRate).toFixed(2)),
-        total_late_minutes: Math.floor(totalShortageSeconds/60)
+        net_salary: parseFloat((Math.floor(netSeconds/60)*minuteRate).toFixed(2)),
+        صافي: parseFloat((Math.floor(netSeconds/60)*minuteRate).toFixed(2)),
+        مستحق: parseFloat((Math.floor(totalSeconds/60)*minuteRate).toFixed(2)),
+        إجمالي: formatHMS(totalSeconds),
+        total_late_minutes: Math.floor(totalLateSeconds/60)
       };
     });
     res.json({ month, workConfig: { start: WORK_START_HOUR, end: WORK_END_HOUR, hours: 8 }, data });
@@ -415,6 +443,7 @@ app.get("/api/admin/reports/monthly", requireAdmin, async (req, res) => {
 app.get("/api/admin/branches", requireAdmin, async (_req, res) => {
   try { const r = await pool.query(`SELECT id,name,latitude,longitude,radius_m,active FROM branches ORDER BY name`); res.json(r.rows); } catch (e) { res.status(500).json({ error: "تعذر تحميل الفروع" }); }
 });
+
 app.patch("/api/admin/branches/:id", requireAdmin, async (req, res) => {
   try {
     const id = Number(req.params.id); const name = cleanText(req.body.name, 120);
@@ -427,6 +456,7 @@ app.patch("/api/admin/branches/:id", requireAdmin, async (req, res) => {
     res.json(r.rows[0]);
   } catch (e) { res.status(400).json({ error: "تعذر تعديل الفرع. تأكد من عدم تكرار اسم فرع آخر." }); }
 });
+
 app.post("/api/admin/branches", requireAdmin, async (req, res) => {
   try {
     const name = cleanText(req.body.name, 120); const lat = Number(req.body.latitude); const lng = Number(req.body.longitude); const requestedRadius = Number(req.body.radius_m || MAX_RADIUS_M);
@@ -436,6 +466,7 @@ app.post("/api/admin/branches", requireAdmin, async (req, res) => {
     res.json(r.rows[0]);
   } catch (e) { res.status(400).json({ error: "تعذر إضافة الفرع. ربما الاسم مستخدم بالفعل." }); }
 });
+
 app.get("/api/admin/export.csv", requireAdmin, async (_req, res) => {
   try {
     const r = await pool.query(`
@@ -466,8 +497,10 @@ app.get("/api/admin/export.csv", requireAdmin, async (_req, res) => {
     res.status(500).json({ error: "تعذر تصدير السجل" }); 
   }
 });
+
 app.get("/admin", (_req, res) => { res.sendFile(path.join(__dirname, "public", "admin.html")); });
 app.get("*", (_req, res) => { res.sendFile(path.join(__dirname, "public", "index.html")); });
+
 initDb().then(() => {
   app.listen(PORT, () => {
     console.log(`Furqan app listening on ${PORT}`);
