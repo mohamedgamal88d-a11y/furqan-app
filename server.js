@@ -503,8 +503,15 @@ app.post("/api/admin/branches", requireAdmin, async (req, res) => {
 
 app.get("/api/admin/export.csv", requireAdmin, async (_req, res) => {
   try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS attendance (
+      id SERIAL PRIMARY KEY,
+      employee_id INT REFERENCES employees(id) ON DELETE CASCADE,
+      branch_id INT REFERENCES branches(id),
+      time TIMESTAMP DEFAULT NOW(),
+      type TEXT
+    )`);
     const r = await pool.query(`SELECT e.code, e.name, a.time, a.type, b.name as branch FROM attendance a JOIN employees e ON e.id=a.employee_id LEFT JOIN branches b ON b.id=a.branch_id ORDER BY a.time DESC`);
-    if(!r.rows.length) return res.status(404).send("مفيش بيانات");
+    if(!r.rows.length) return res.status(404).send("مفيش بيانات لسه");
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('الحضور');
     sheet.columns = [
