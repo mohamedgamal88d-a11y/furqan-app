@@ -301,6 +301,16 @@ app.post("/api/leave", async (req, res) => {
     if (!code || !pin || !type || !leaveDate || !reason) return res.status(400).json({ error: "أكمل بيانات الإجازة" });
     const er = await pool.query(`SELECT id, name, pin_hash FROM employees WHERE code = $1 AND active = true`, [code]);
     if (!er.rowCount || !(await bcrypt.compare(pin, er.rows[0].pin_hash))) return res.status(401).json({ error: "كود الموظف أو الرقم السري غير صحيح." });
+    // === قانون اليومين - لازم يطلب قبلها بيومين ===
+    const nowCairoStr = new Date().toLocaleString("en-US", { timeZone: "Africa/Cairo" });
+    const todayCairo = new Date(nowCairoStr);
+    todayCairo.setHours(0,0,0,0);
+    const leave = new Date(leaveDate);
+    leave.setHours(0,0,0,0);
+    const diffDays = Math.ceil((leave - todayCairo) / (1000*60*60*24));
+    if (diffDays < 2) {
+      return res.status(400).json({ error: `لازم تطلب الإجازة قبلها بيومين على الأقل. ماينفعش تطلب إجازة ${leaveDate} والنهاردة ${todayCairo.toISOString().slice(0,10)} - تقدر تطلب من بعد بكرة وطالع.` });
+    }
     const employee = er.rows[0];
     const saved = await pool.query(`INSERT INTO leave_requests (employee_id, type, leave_date, reason) VALUES ($1,$2,$3,$4) RETURNING id, created_at`, [employee.id, type, leaveDate, reason]);
     await sendTelegram(`طلب إجازة جديد\n${employee.name} (${code})\nالنوع: ${type}\nالتاريخ: ${leaveDate}\nالسبب: ${reason}`);
