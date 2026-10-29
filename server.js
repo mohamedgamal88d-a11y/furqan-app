@@ -503,17 +503,23 @@ app.post("/api/admin/branches", requireAdmin, async (req, res) => {
 
 app.get("/api/admin/export.csv", requireAdmin, async (_req, res) => {
   try {
-    const r = await pool.query('SELECT e.code as "كود الموظف", e.name as "اسم الموظف", a.time as "الوقت", a.type as "النوع", b.name as "الفرع" FROM attendance a JOIN employees e ON e.id=a.employee_id LEFT JOIN branches b ON b.id=a.branch_id ORDER BY a.time DESC');
+    const r = await pool.query(`SELECT e.code, e.name, a.time, a.type, b.name as branch FROM attendance a JOIN employees e ON e.id=a.employee_id LEFT JOIN branches b ON b.id=a.branch_id ORDER BY a.time DESC`);
     if(!r.rows.length) return res.status(404).send("مفيش بيانات");
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('الحضور');
-    sheet.columns = Object.keys(r.rows[0]).map(k => ({ header: k, key: k, width: 20 }));
+    sheet.columns = [
+      { header: 'كود الموظف', key: 'code', width: 20 },
+      { header: 'اسم الموظف', key: 'name', width: 25 },
+      { header: 'الوقت', key: 'time', width: 25 },
+      { header: 'النوع', key: 'type', width: 15 },
+      { header: 'الفرع', key: 'branch', width: 20 },
+    ];
     sheet.addRows(r.rows);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename=furqan-attendance.xlsx');
     await workbook.xlsx.write(res);
     res.end();
-  } catch (e) { console.error(e); res.status(500).json({ error: "خطأ" })}
+  } catch (e) { console.error(e); res.status(500).json({ error: e.message })}
 });
 
 app.get("/admin", (_req, res) => { res.sendFile(path.join(__dirname, "public", "admin.html")); });
