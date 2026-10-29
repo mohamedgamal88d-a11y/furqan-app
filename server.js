@@ -6,7 +6,7 @@ const { Pool } = require("pg");
 const bcrypt = require("bcryptjs");
 const helmet = require("helmet");
 const path = require("path");
-
+const ExcelJS = require("exceljs");
 const app = express();
 const PORT = process.env.PORT || 3000;
 const isProd = process.env.NODE_ENV === "production";
@@ -503,11 +503,17 @@ app.post("/api/admin/branches", requireAdmin, async (req, res) => {
 
 app.get("/api/admin/export.csv", requireAdmin, async (_req, res) => {
   try {
-    const r = await pool.query(`SELECT e.code as "كود الموظف", e.name AS "اسم الموظف", b.name AS "الفرع", l.action_type AS "نوع التسجيل", (l.created_at AT TIME ZONE 'Africa/Cairo')::text AS "التاريخ والوقت", l.late_minutes AS "تأخير دقايق", l.work_hours AS "ساعات عمل", l.distance_m AS "المسافة" FROM attendance_logs l JOIN employees e ON e.id = l.employee_id JOIN branches b ON b.id = l.branch_id ORDER BY l.created_at DESC`);
+    const r = await pool.query(`SELECT e.code as "كود الموظف", e.name as "اسم الموظف", a.time as "الوقت", a.type as "النوع", b.name as "الفرع" FROM attendance a JOIN employees e ON e.id=a.employee_id LEFT JOIN branches b ON b.id=a.branch_id ORDER BY a.time DESC`);
     if(!r.rows.length) return res.status(404).send("مفيش بيانات");
-    const cols = Object.keys(r.rows[0]); const header = cols.join(";"); const csvRows = r.rows.map(row => cols.map(k => `"${String(row[k] ?? "").replace(/"/g, '""')}"`).join(";")).join("\r\n"); const csv = "sep=;\r\n" + header + "\r\n" + csvRows;
-    res.setHeader("Content-Type", "text/csv; charset=utf-8"); res.setHeader("Content-Disposition", 'attachment; filename="furqan-attendance.csv"'); res.send("\uFEFF" + csv);
-  } catch (e) { console.error(e); res.status(500).json({ error: "تعذر تصدير السجل" }); }
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('الحضور');
+    sheet.columns = Object.keys(r.rows[0]).map(k => ({ header: k, key: k, width: 20 }));
+    sheet.addRows(r.rows);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename=furqan-attendance.xlsx');
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (e) { console.error(e); res.status(500).json({ error: "خطأ" })}
 });
 
 app.get("/admin", (_req, res) => { res.sendFile(path.join(__dirname, "public", "admin.html")); });
