@@ -1,28 +1,99 @@
 <!doctype html>
-<html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#17324d"><title>شركة الفرقان | الحضور والانصراف</title>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0F2A4A">
+<title>Al Furqan Premium | شركة الفرقان</title>
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800;900&display=swap" rel="stylesheet">
 <style>
-*{box-sizing:border-box}body{margin:0;background:#f1f5f9;font-family:Tahoma,Arial,sans-serif;color:#182433;min-height:100vh;display:grid;place-items:center;padding:18px}
-.card{background:#fff;width:min(100%,480px);padding:24px;border-radius:18px;box-shadow:0 12px 36px #102a4315}h1{margin:0 0 8px;color:#17324d;font-size:25px}p{line-height:1.7;color:#526173}.sub{margin-top:0}
-label{display:block;font-weight:bold;margin:16px 0 7px}input,select,button,textarea{width:100%;padding:13px;border:1px solid #ccd5df;border-radius:10px;font:inherit}button{border:0;background:#176b4d;color:#fff;font-weight:bold;cursor:pointer;margin-top:16px;transition:.2s}button.secondary{background:#17324d}button.tertiary{background:#8B5E3C}button.fourth{background:#2E7D32}button:disabled{opacity:.9;background:#111 !important;color:#fff;cursor:not-allowed}button.done{opacity:.9;background:#111 !important} .actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}.actions button{margin-top:14px}.notice{padding:12px;border-radius:10px;background:#f4f7fa;margin-top:16px;white-space:pre-wrap;line-height:1.7}.ok{background:#e7f8ee;color:#11643b}.bad{background:#fff0ef;color:#a3261d}.small{font-size:12px;color:#64748b}
-#leaveForm,#myLogs{display:none;margin-top:16px;padding:16px;border-radius:12px;background:#f8fafc;border:1px solid #e2e8f0}
-table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid #ddd;padding:8px;font-size:13px;text-align:center}th{background:#17324d;color:#fff}
-</style></head><body><main class="card"><img src="logo.png" style="width:110px; display:block; margin:0 auto 16px;"><h1>شركة الفرقان</h1><p class="sub">نظام تسجيل الحضور والانصراف</p>
-<label for="code">كود الموظف</label><input id="code" autocomplete="username" maxlength="40" placeholder="اكتب كود الموظف">
-<label for="pin">الرقم السري للموظف</label><input id="pin" type="password" autocomplete="current-password" maxlength="100" placeholder="اكتب الرقم السري">
-<label for="branch">الفرع</label><select id="branch"><option value="">جارٍ تحميل الفروع...</option></select>
-<div class="actions"><button id="in" onclick="submitAttendance('حضور')">تسجيل حضور</button><button id="out" class="secondary" onclick="submitAttendance('انصراف')">تسجيل انصراف</button></div>
-<div class="actions"><button class="tertiary" onclick="toggleLeave()">طلب اجازة</button><button class="fourth" onclick="loadMyAttendance()">سجلي (30 يوم)</button></div>
-<div id="leaveForm">
-<h3 style="margin:0 0 10px">طلب اجازة جديد</h3>
-<label>نوع الاجازة</label><select id="lType"><option value="اعتيادية">اعتيادية</option><option value="عارضة">عارضة</option><option value="مرضية">مرضية</option><option value="سنوية">سنوية</option></select>
-<label>تاريخ الاجازة</label><input id="lDate" type="date">
-<label>السبب</label><textarea id="lReason" rows="3" placeholder="اكتب سبب الاجازة"></textarea>
-<button onclick="sendLeave()">ارسال الطلب</button>
+:root{--navy:#0F2A4A;--navy2:#122F52;--gold:#C8A84E;--gold2:#E8C86A;--bg:#F6F5F0;--text:#1A2E4A}
+*{box-sizing:border-box;font-family:'Tajawal',sans-serif}
+body{margin:0;background:#0A1931;min-height:100vh;display:flex;justify-content:center;padding:0}
+.phone{width:410px;max-width:100vw;min-height:100vh;background:linear-gradient(180deg,#F9F8F4 0%, #F2F0EA 100%);display:flex;flex-direction:column;position:relative;box-shadow:0 0 0 10px #000}
+@media(max-width:420px){.phone{box-shadow:none}}
+.header{background: linear-gradient(135deg, #0F2A4A 0%, #17365F 100%);padding:18px 20px 22px; color:white; position:relative; overflow:hidden}
+.header::before{content:'';position:absolute;inset:0;background: radial-gradient(300px 200px at 15% 10%, rgba(200,168,78,0.18), transparent 70%)}
+.topRow{display:flex;justify-content:space-between;align-items:center;position:relative;z-index:1}
+.brand{display:flex;align-items:center;gap:10px}
+.logoCircle{width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,#C8A84E,#E8C86A);display:grid;place-items:center;color:#0F2A4A;font-weight:900;font-size:22px}
+.brandText h1{margin:0;font-size:19px;font-weight:900;letter-spacing:.3px}
+.brandText span{display:block;font-size:10px;color:#E8C86A;letter-spacing:3px;margin-top:2px;font-weight:700}
+.menuDots{width:36px;height:36px;border-radius:10px;background:rgba(255,255,255,0.1);display:grid;place-items:center;font-size:18px;cursor:pointer}
+.welcome{margin-top:22px;position:relative;z-index:1}
+.welcome .hi{font-size:26px;font-weight:800;margin:0;line-height:1.2}
+.welcome .hi span{color:#E8C86A}
+.welcome .subQ{margin:8px 0 0;color:#8EA3C0;font-size:15px;font-weight:400}
+.content{padding:18px 16px 90px;flex:1}
+.loginStrip{background:white;border-radius:16px;padding:14px;border:1px solid #E8E0C8;box-shadow:0 4px 18px rgba(15,42,74,0.06);margin-bottom:16px}
+.loginStrip label{display:block;font-size:12px;font-weight:700;color:#0F2A4A;margin:10px 0 6px}
+.loginStrip label:first-child{margin-top:0}
+.loginStrip input, .loginStrip select{width:100%;padding:12px 14px;border:1px solid #D9DDE3;border-radius:10px;font-size:14px;background:#FBFBFA}
+.cards{display:grid;gap:14px}
+.cardBtn{background:white;border-radius:20px;padding:16px;display:flex;align-items:center;gap:14px;border:1px solid #EDE6D3;cursor:pointer;transition:.2s;box-shadow:0 6px 20px rgba(15,42,74,0.06);text-align:right;position:relative;overflow:hidden}
+.cardBtn:active{transform:scale(.98)}
+.cardBtn .iconWrap{width:52px;height:52px;border-radius:16px;background:linear-gradient(135deg,#C8A84E,#E8C86A);display:grid;place-items:center;font-size:24px;flex-shrink:0;box-shadow:0 6px 14px rgba(200,168,78,0.35)}
+.cardBtn .txt{flex:1}
+.cardBtn .txt h3{margin:0;font-size:16px;font-weight:800;color:#0F2A4A}
+.cardBtn .txt p{margin:4px 0 0;font-size:13px;color:#6B7E98;line-height:1.4}
+.cardBtn .arrow{color:#C2B9A0;font-size:18px}
+.section{background:white;border-radius:20px;padding:18px;border:1px solid #E8E0C8;margin-top:14px;box-shadow:0 8px 24px rgba(15,42,74,0.07)}
+.section h3{margin:0 0 12px;font-size:17px;font-weight:800;color:#0F2A4A}
+.section label{display:block;font-size:13px;font-weight:700;color:#0F2A4A;margin:12px 0 6px}
+.section input, .section select, .section textarea{width:100%;padding:13px 14px;border:1px solid #D9DDE3;border-radius:12px;font-size:14px;background:#FBFBFA}
+.section textarea{resize:vertical}
+.btn{width:100%;padding:14px;border:0;border-radius:12px;font-weight:800;font-size:16px;cursor:pointer;margin-top:14px;transition:.2s}
+.btnPrimary{background:linear-gradient(180deg,#1A3A65,#0F2A4A);color:#E8C86A;border:1px solid #C8A84E}
+.btnGreen{background:linear-gradient(180deg,#1A8B5A,#176B4D);color:white}
+.btnDark{background:#0F2A4A;color:white}
+.btn:active{transform:scale(.98)}
+.btn:disabled{opacity:.6;background:#111 !important;color:#fff;cursor:not-allowed}
+.btn.done{opacity:.9;background:#111 !important}
+.actions2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.notice{padding:12px;border-radius:12px;margin-top:14px;white-space:pre-wrap;line-height:1.7;font-size:13px;font-weight:600}
+.ok{background:#E7F8EE;color:#11643B;border:1px solid #B8E6C8}
+.bad{background:#FFF0EF;color:#A3261D;border:1px solid #F5C2C2}
+.small{font-size:11px;color:#7A8AA3;text-align:center;margin-top:14px;line-height:1.6}
+table{width:100%;border-collapse:collapse;margin-top:10px}
+th,td{border:1px solid #E5E7EB;padding:8px;font-size:13px;text-align:center}
+th{background:#0F2A4A;color:#E8C86A}
+.bottomNav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:410px;max-width:100vw;background:linear-gradient(180deg,#102A4B,#0D2340);padding:8px 10px 14px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;border-top:1px solid rgba(200,168,78,0.25);z-index:10}
+.navItem{display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px;border-radius:14px;cursor:pointer;color:#8EA3C0;font-size:11px;font-weight:600;transition:.2s}
+.navItem.active{color:#E8C86A;background:rgba(200,168,78,0.12)}
+.navItem .ico{font-size:20px}
+.hidden{display:none !important}
+#leaveForm,#myLogs{display:none}
+#myLogs{margin-top:14px}
+</style>
+</head>
+<body>
+<div class="phone">
+  <div class="header">
+    <div class="topRow">
+      <div class="brand"><div class="logoCircle">ف</div><div class="brandText"><h1>Al Furqan</h1><span>PREMIUM</span></div></div>
+      <div class="menuDots">•••</div>
+    </div>
+    <div class="welcome"><p class="hi">مرحباً, <span id="welcomeName">موظف</span> 👋</p><p class="subQ">ما الذي تريد فعله اليوم؟</p></div>
+  </div>
+  <div class="content">
+    <div class="loginStrip">
+      <label for="code">كود الموظف</label><input id="code" autocomplete="username" maxlength="40" placeholder="مثال: EMP001">
+      <label for="pin">الرقم السري</label><input id="pin" type="password" autocomplete="current-password" maxlength="100" placeholder="••••">
+      <label for="branch">الفرع</label><select id="branch"><option value="">جارٍ تحميل الفروع...</option></select>
+    </div>
+    <div class="cards">
+      <div class="cardBtn" onclick="openSection('attendance')"><div class="iconWrap">📍</div><div class="txt"><h3>تسجيل حضور / انصراف في الفرع</h3><p>سجل حضورك أو انصرافك مع التحقق من الموقع</p></div><div class="arrow">‹</div></div>
+      <div class="cardBtn" onclick="openSection('leave')"><div class="iconWrap">📝</div><div class="txt"><h3>تقديم طلب إجازة</h3><p>اطلب إجازتك قبلها بيومين على الأقل</p></div><div class="arrow">‹</div></div>
+      <div class="cardBtn" onclick="openSection('history')"><div class="iconWrap">📊</div><div class="txt"><h3>سجل الحضور والغياب بتاعي</h3><p>عرض سجل آخر 30 يوم</p></div><div class="arrow">‹</div></div>
+    </div>
+    <div id="section-attendance" class="section hidden"><h3>📍 تسجيل الحضور والانصراف</h3><div class="actions2"><button id="in" class="btn btnPrimary" onclick="submitAttendance('حضور')">تسجيل حضور</button><button id="out" class="btn btnDark" onclick="submitAttendance('انصراف')">تسجيل انصراف</button></div><p class="small">سيتم التحقق من موقعك GPS للتأكد من تواجدك في الفرع</p></div>
+    <div id="section-leave" class="section hidden"><h3>📝 طلب إجازة جديد</h3><div id="leaveForm" style="display:block;border:0;padding:0;background:transparent"><label>نوع الإجازة</label><select id="lType"><option value="اعتيادية">اعتيادية</option><option value="عارضة">عارضة</option><option value="مرضية">مرضية</option><option value="سنوية">سنوية</option></select><label>تاريخ الإجازة</label><input id="lDate" type="date"><label>السبب</label><textarea id="lReason" rows="3" placeholder="اكتب سبب الإجازة"></textarea><button class="btn btnGreen" onclick="sendLeave()">ارسال الطلب</button></div></div>
+    <div id="section-history" class="section hidden"><h3>📊 سجلي (30 يوم)</h3><button class="btn btnPrimary" onclick="loadMyAttendance()">عرض سجل الحضور</button><div id="myLogs" style="display:block"></div></div>
+    <div id="message" class="notice ok">اختر الفرع واسمح للموقع بالوصول إلى GPS عند التسجيل.</div>
+    <p class="small">لن تظهر لك سجلات الموظفين الآخرين. للإدارة صفحة منفصلة ومحمية.<br>الإجازة لازم قبلها بيومين - النظام يبدأ من بعد بكرة تلقائياً.</p>
+  </div>
+  <div class="bottomNav"><div class="navItem active" onclick="goHome()"><span class="ico">🏠</span>الرئيسية</div><div class="navItem" onclick="openSection('history')"><span class="ico">👤</span>حسابي</div><div class="navItem" onclick="openSection('leave')"><span class="ico">⚙️</span>الإعدادات</div></div>
 </div>
-<div id="myLogs"></div>
-<div id="message" class="notice" role="status">اختر الفرع واسمح للموقع بالوصول إلى GPS عند التسجيل.</div>
-<p class="small">لن تظهر لك سجلات الموظفين الآخرين. للإدارة صفحة منفصلة ومحمية.</p></main>
 <script>
 const $=id=>document.getElementById(id);
 const todayKey = ()=> new Date().toISOString().slice(0,10);
@@ -42,24 +113,8 @@ function setStoredStatus(inDone,outDone){
 }
 function applyButtonsState(){
   const s = getStoredStatus();
-  if(s.in){
-    $('in').disabled = true;
-    $('in').textContent = 'تم تسجيل الحضور ✓';
-    $('in').classList.add('done');
-  } else {
-    $('in').disabled = false;
-    $('in').textContent = 'تسجيل حضور';
-    $('in').classList.remove('done');
-  }
-  if(s.out){
-    $('out').disabled = true;
-    $('out').textContent = 'تم تسجيل الانصراف ✓';
-    $('out').classList.add('done');
-  } else {
-    $('out').disabled = false;
-    $('out').textContent = 'تسجيل انصراف';
-    $('out').classList.remove('done');
-  }
+  if(s.in){$('in').disabled = true;$('in').textContent = 'تم تسجيل الحضور ✓';$('in').classList.add('done');} else {$('in').disabled = false;$('in').textContent = 'تسجيل حضور';$('in').classList.remove('done');}
+  if(s.out){$('out').disabled = true;$('out').textContent = 'تم تسجيل الانصراف ✓';$('out').classList.add('done');} else {$('out').disabled = false;$('out').textContent = 'تسجيل انصراف';$('out').classList.remove('done');}
 }
 async function loadBranches(){try{const r=await fetch('/api/branches');const data=await r.json();$('branch').innerHTML='<option value="">اختر الفرع</option>'+data.map(b=>`<option value="${b.id}" ${!b.configured?'disabled':''}>${escapeHtml(b.name)}${!b.configured?' — غير مجهز':''}</option>`).join('')}catch(e){$('branch').innerHTML='<option value="">تعذر تحميل الفروع</option>'}}
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
@@ -77,20 +132,13 @@ async function submitAttendance(action){
     const r=await fetch('/api/attendance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code,pin,branchId:Number(branchId),action,...loc})});
     const data=await r.json();
     if(!r.ok)throw new Error(data.error||'تعذر التسجيل.');
-    const branchEl = $('branch');
-    const selectedBranchName = branchEl.options[branchEl.selectedIndex]?.text;
-    const branchName = data.branch || data.branch_name || selectedBranchName;
+    const branchEl = $('branch');const selectedBranchName = branchEl.options[branchEl.selectedIndex]?.text;const branchName = data.branch || data.branch_name || selectedBranchName;
     show(`${data.message}\nالفرع: ${branchName}\nالوقت: ${data.time}`,true);
-    if(action==='حضور') setStoredStatus(true,false);
-    else setStoredStatus(false,true);
+    if(action==='حضور') setStoredStatus(true,false); else setStoredStatus(false,true);
     $('pin').value='';
   }catch(e){show(e.message||'حدث خطأ.',false); applyButtonsState();}
 }
-function toggleLeave(){
-  const f=$('myLogs'); f.style.display='none';
-  const el=$('leaveForm');
-  el.style.display= el.style.display==='block' ? 'none' : 'block';
-}
+function toggleLeave(){openSection('leave');}
 async function sendLeave(){
  const code=$('code').value.trim(), pin=$('pin').value, type=$('lType').value, date=$('lDate').value, reason=$('lReason').value.trim();
  if(!code||!pin||!date||!reason) return show('اكمل بيانات الاجازة (الكود والباسورد والتاريخ والسبب)',false);
@@ -116,8 +164,21 @@ async function loadMyAttendance(){
   show('تم تحميل السجل ✓',true);
  }catch(e){ show(e.message,false); }
 }
-$('code').addEventListener('input', applyButtonsState);
-$('code').addEventListener('change', applyButtonsState);
-loadBranches();
-applyButtonsState();
-</script></body></html>
+function openSection(name){
+  document.querySelectorAll('[id^="section-"]').forEach(el=>el.classList.add('hidden'));
+  const target=document.getElementById('section-'+name);
+  if(target){ target.classList.remove('hidden'); target.scrollIntoView({behavior:'smooth',block:'start'}); }
+  if(name==='leave'){
+    const d=new Date(); d.setDate(d.getDate()+2); const iso=d.toISOString().slice(0,10); const el=document.getElementById('lDate'); if(el){ el.min=iso; if(!el.value) el.value=iso; }
+  }
+  if(name==='history'){ const l=document.getElementById('myLogs'); if(l) l.style.display='block'; }
+  document.querySelectorAll('.bottomNav .navItem').forEach((n,i)=>{ n.classList.remove('active'); if((name==='attendance'&&i===0)||(name==='history'&&i===1)||(name==='leave'&&i===2)) n.classList.add('active'); });
+}
+function goHome(){ document.querySelectorAll('[id^="section-"]').forEach(el=>el.classList.add('hidden')); document.querySelectorAll('.bottomNav .navItem').forEach(el=>el.classList.remove('active')); document.querySelectorAll('.bottomNav .navItem')[0].classList.add('active'); window.scrollTo({top:0,behavior:'smooth'}); }
+document.getElementById('code')?.addEventListener('input', (e)=>{ const v=e.target.value.trim(); document.getElementById('welcomeName').textContent=v? v : 'موظف'; applyButtonsState(); });
+document.getElementById('code')?.addEventListener('change', applyButtonsState);
+(function(){ const d=new Date(); d.setDate(d.getDate()+2); const iso=d.toISOString().slice(0,10); const el=document.getElementById('lDate'); if(el){ el.min=iso; } })();
+loadBranches();applyButtonsState();
+</script>
+</body>
+</html>
