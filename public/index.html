@@ -74,30 +74,36 @@ th{background:#0F2A4A;color:#E8C86A}
     <div class="welcome"><p class="hi">مرحباً, <span id="welcomeName">موظف</span> 👋</p><p class="subQ">ما الذي تريد فعله اليوم؟</p></div>
   </div>
   <div class="content">
-    <div class="loginStrip">
-      <label for="code">كود الموظف</label><input id="code" autocomplete="username" maxlength="40" placeholder="مثال: EMP001">
-      <label for="pin">الرقم السري</label><input id="pin" type="password" autocomplete="current-password" maxlength="100" placeholder="••••">
-      <label for="branch">الفرع</label><select id="branch"><option value="">جارٍ تحميل الفروع...</option></select>
-    </div>
-    <div class="cards">
-      <div class="cardBtn" onclick="openSection('attendance')"><div class="iconWrap">📍</div><div class="txt"><h3>تسجيل حضور / انصراف في الفرع</h3><p>سجل حضورك أو انصرافك مع التحقق من الموقع</p></div><div class="arrow">‹</div></div>
-      <div class="cardBtn" onclick="openSection('leave')"><div class="iconWrap">📝</div><div class="txt"><h3>تقديم طلب إجازة</h3><p>اطلب إجازتك قبلها بيومين على الأقل</p></div><div class="arrow">‹</div></div>
-      <div class="cardBtn" onclick="openSection('history')"><div class="iconWrap">📊</div><div class="txt"><h3>سجل الحضور والغياب بتاعي</h3><p>عرض سجل آخر 30 يوم</p></div><div class="arrow">‹</div></div>
-    </div>
 
-    <div id="section-attendance" class="section hidden"><h3>📍 تسجيل الحضور والانصراف</h3><div class="actions2"><button id="in" class="btn btnPrimary" onclick="submitAttendance('حضور')">تسجيل حضور</button><button id="out" class="btn btnDark" onclick="submitAttendance('انصراف')">تسجيل انصراف</button></div><p class="small">سيتم التحقق من موقعك GPS للتأكد من تواجدك في الفرع</p></div>
-    <div id="section-leave" class="section hidden"><h3>📝 طلب إجازة جديد</h3><div id="leaveForm" style="display:block;border:0;padding:0;background:transparent"><label>نوع الإجازة</label><select id="lType"><option value="اعتيادية">اعتيادية</option><option value="عارضة">عارضة</option><option value="مرضية">مرضية</option><option value="سنوية">سنوية</option></select><label>تاريخ الإجازة</label><input id="lDate" type="date"><label>السبب</label><textarea id="lReason" rows="3" placeholder="اكتب سبب الإجازة"></textarea><button class="btn btnPrimary" onclick="sendLeave()">ارسال الطلب</button></div></div>
-    <div id="section-history" class="section hidden"><h3>📊 سجلي (30 يوم)</h3><button class="btn btnPrimary" onclick="loadMyAttendance()">عرض سجل الحضور</button><div id="myLogs" style="display:block"></div></div>
-
-    <div id="section-profile" class="section hidden">
-      <h3>👤 حسابي - حضور اليوم</h3>
-      <div class="todayBox">
-        <div class="todayRow"><span class="label">كود الموظف</span><span class="value" id="pCode">-</span></div>
-        <div class="todayRow"><span class="label">الفرع</span><span class="value" id="pBranch">-</span></div>
-        <div class="todayRow"><span class="label">حضور اليوم</span><span class="value not" id="pIn">لم يتم التسجيل</span></div>
-        <div class="todayRow"><span class="label">انصراف اليوم</span><span class="value not" id="pOut">لم يتم التسجيل</span></div>
+    <!-- صفحة 1 : الرئيسية لوحدها -->
+    <div id="page-home">
+      <div class="loginStrip">
+        <label for="code">كود الموظف</label><input id="code" autocomplete="username" maxlength="40" placeholder="مثال: EMP001">
+        <label for="pin">الرقم السري</label><input id="pin" type="password" autocomplete="current-password" maxlength="100" placeholder="••••">
+        <label for="branch">الفرع</label><select id="branch"><option value="">جارٍ تحميل الفروع...</option></select>
       </div>
-      <p class="small">التوقيت بيتحفظ تلقائياً أول ما تسجل</p>
+      <div class="cards">
+        <div class="cardBtn" onclick="openSection('attendance')"><div class="iconWrap">📍</div><div class="txt"><h3>تسجيل حضور / انصراف في الفرع</h3><p>سجل حضورك أو انصرافك مع التحقق من الموقع</p></div><div class="arrow">‹</div></div>
+        <div class="cardBtn" onclick="openSection('leave')"><div class="iconWrap">📝</div><div class="txt"><h3>تقديم طلب إجازة</h3><p>اطلب إجازتك قبلها بيومين على الأقل</p></div><div class="arrow">‹</div></div>
+        <div class="cardBtn" onclick="openSection('history')"><div class="iconWrap">📊</div><div class="txt"><h3>سجل الحضور والغياب بتاعي</h3><p>عرض سجل آخر 30 يوم</p></div><div class="arrow">‹</div></div>
+      </div>
+      <div id="section-attendance" class="section hidden"><h3>📍 تسجيل الحضور والانصراف</h3><div class="actions2"><button id="in" class="btn btnPrimary" onclick="submitAttendance('حضور')">تسجيل حضور</button><button id="out" class="btn btnDark" onclick="submitAttendance('انصراف')">تسجيل انصراف</button></div><p class="small">سيتم التحقق من موقعك GPS للتأكد من تواجدك في الفرع</p></div>
+      <div id="section-leave" class="section hidden"><h3>📝 طلب إجازة جديد</h3><div id="leaveForm" style="display:block;border:0;padding:0;background:transparent"><label>نوع الإجازة</label><select id="lType"><option value="اعتيادية">اعتيادية</option><option value="عارضة">عارضة</option><option value="مرضية">مرضية</option><option value="سنوية">سنوية</option></select><label>تاريخ الإجازة</label><input id="lDate" type="date"><label>السبب</label><textarea id="lReason" rows="3" placeholder="اكتب سبب الإجازة"></textarea><button class="btn btnPrimary" onclick="sendLeave()">ارسال الطلب</button></div></div>
+      <div id="section-history" class="section hidden"><h3>📊 سجلي (30 يوم)</h3><button class="btn btnPrimary" onclick="loadMyAttendance()">عرض سجل الحضور</button><div id="myLogs" style="display:block"></div></div>
+    </div>
+
+    <!-- صفحة 2 : حسابي لوحدها -->
+    <div id="page-profile" class="hidden">
+      <div class="section" style="margin-top:0">
+        <h3>👤 حسابي - حضور اليوم</h3>
+        <div class="todayBox">
+          <div class="todayRow"><span class="label">كود الموظف</span><span class="value" id="pCode">-</span></div>
+          <div class="todayRow"><span class="label">الفرع</span><span class="value" id="pBranch">-</span></div>
+          <div class="todayRow"><span class="label">حضور اليوم</span><span class="value not" id="pIn">لم يتم التسجيل</span></div>
+          <div class="todayRow"><span class="label">انصراف اليوم</span><span class="value not" id="pOut">لم يتم التسجيل</span></div>
+        </div>
+        <p class="small">التوقيت بيتحفظ تلقائياً أول ما تسجل</p>
+      </div>
     </div>
 
     <div id="message" class="notice ok">اختر الفرع واسمح للموقع بالوصول إلى GPS عند التسجيل.</div>
@@ -178,7 +184,7 @@ async function loadMyAttendance(){
  try{
   const r=await fetch(`/api/my-attendance?code=${encodeURIComponent(code)}&pin=${encodeURIComponent(pin)}`);
   const j=await r.json(); if(!r.ok) throw new Error(j.error);
-  let html=`<h3>سجل ${j.employee} - 30 يوم</h3><table><tr><th>تاريخ</th><th>حضور</th><th>انصراف</th><th>حالة</th></tr>`;
+  let html=`<table><tr><th>تاريخ</th><th>حضور</th><th>انصراف</th><th>حالة</th></tr>`;
   j.records.forEach(x=>{ html+=`<tr><td>${x.date}</td><td>${x.in}</td><td>${x.out}</td><td>${x.status}</td></tr>`; });
   html+='</table>';
   $('myLogs').innerHTML=html; $('myLogs').style.display='block';
@@ -186,25 +192,33 @@ async function loadMyAttendance(){
  }catch(e){ show(e.message,false); }
 }
 function openSection(name){
-  document.querySelectorAll('[id^="section-"]').forEach(el=>el.classList.add('hidden'));
+  goHomeTabsOnly();
+  document.querySelectorAll('#page-home [id^="section-"]').forEach(el=>el.classList.add('hidden'));
   const target=document.getElementById('section-'+name);
   if(target){ target.classList.remove('hidden'); target.scrollIntoView({behavior:'smooth',block:'start'}); }
   if(name==='leave'){
     const d=new Date(); d.setDate(d.getDate()+2); const iso=d.toISOString().slice(0,10); const el=$('lDate'); if(el){ el.min=iso; if(!el.value) el.value=iso; }
   }
   if(name==='history'){ const l=$('myLogs'); if(l) l.style.display='block'; }
-  setActive('home');
 }
 function openProfile(){
-  document.querySelectorAll('[id^="section-"]').forEach(el=>el.classList.add('hidden'));
-  $('section-profile').classList.remove('hidden');
+  $('page-home').classList.add('hidden');
+  $('page-profile').classList.remove('hidden');
   updateProfileView();
   setActive('profile');
+  window.scrollTo({top:0,behavior:'smooth'});
 }
 function goHome(){ 
-  document.querySelectorAll('[id^="section-"]').forEach(el=>el.classList.add('hidden')); 
+  $('page-profile').classList.add('hidden');
+  $('page-home').classList.remove('hidden');
+  document.querySelectorAll('#page-home [id^="section-"]').forEach(el=>el.classList.add('hidden'));
   setActive('home'); 
   window.scrollTo({top:0,behavior:'smooth'}); 
+}
+function goHomeTabsOnly(){
+  $('page-profile').classList.add('hidden');
+  $('page-home').classList.remove('hidden');
+  setActive('home');
 }
 function setActive(which){
   document.querySelectorAll('.bottomNav .navItem').forEach(el=>el.classList.remove('active'));
