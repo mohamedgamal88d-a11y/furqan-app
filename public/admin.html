@@ -8,6 +8,9 @@
 <section id="login" class="card"><h1>شركة الفرقان — لوحة الإدارة</h1><p>هذه الصفحة للإدارة فقط.</p><form id="loginForm"><label>اسم المستخدم</label><input id="username" required autocomplete="username"><label>كلمة السر</label><input id="password" type="password" required autocomplete="current-password"><button style="margin-top:14px">دخول لوحة الإدارة</button></form><p id="loginMsg" class="notice hidden"></p></section>
 <div id="app" class="hidden">
 <header class="card"><div class="toolbar"><div style="flex:1"><h1>لوحة إدارة الحضور والانصراف</h1><p class="muted">الدوام 9 صباحا - 5 مساء (8 ساعات) | نطاق الحضور 200 متر | الحساب بالدقيقة والثانية</p></div><button class="alt" onclick="loadAll()">تحديث السجلات</button><button onclick="location.href='/api/admin/export.csv'">تصدير Excel / CSV</button><button class="danger" onclick="logout()">خروج</button></div><p id="status" class="notice hidden"></p></header>
+
+<section class="card"><h2>طلبات الإجازات - جديد ✨</h2><div class="toolbar"><button class="alt" onclick="loadLeaves()">تحديث الطلبات</button></div><div class="scroll"><table><thead><tr><th>الموظف</th><th>الكود</th><th>النوع</th><th>تاريخ الإجازة</th><th>السبب</th><th>الحالة</th><th>تاريخ الطلب</th><th>إجراء</th></tr></thead><tbody id="leaves"></tbody></table></div></section>
+
 <section class="card"><h2>سجل الحضور والانصراف</h2><div class="grid"><div><label>من تاريخ</label><input type="date" id="from"></div><div><label>إلى تاريخ</label><input type="date" id="to"></div><div><label>بحث (موظف / كود / فرع)</label><input id="search" placeholder="اكتب للبحث"></div><div style="align-self:end"><button onclick="loadLogs()">بحث وتحديث</button></div></div><p id="count" class="muted"></p><div class="scroll"><table><thead><tr><th>التاريخ والوقت</th><th>كود الموظف</th><th>اسم الموظف</th><th>الفرع</th><th>الحركة</th><th>المسافة</th><th>تأخير</th><th>ساعات</th><th>GPS</th></tr></thead><tbody id="logs"></tbody></table></div></section>
 <section class="card"><h2>إضافة موظف</h2><form id="employeeForm" class="grid"><div><label>كود الموظف</label><input id="empCode" required></div><div><label>اسم الموظف</label><input id="empName" required></div><div><label>رقم سري للموظف (4 أحرف/أرقام على الأقل)</label><input id="empPin" required minlength="4"></div><div><label>المرتب (جنيه)</label><input id="empSalary" type="number" min="0" step="100" value="0" required></div><div style="align-self:end"><button>إضافة الموظف</button></div></form><div class="scroll"><table><thead><tr><th>الكود</th><th>الاسم</th><th>المرتب</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody id="employees"></tbody></table></div></section>
 <section class="card"><h2>التقرير الشهري - المرتبات وساعات العمل والتأخير (بالدقيقة والثانية)</h2><div class="grid"><div><label>اختار الشهر</label><input type="month" id="reportMonth"></div><div style="align-self:end"><button onclick="loadMonthly()">عرض التقرير</button></div></div><p class="muted">التقرير الجديد يحسب كل يوم لوحده: حضور + انصراف = ساعات اليوم. الإجمالي = مجموع ساعات كل الأيام. مثال: يوم 27 = 6:15:20 + يوم 28 = 7:02:10 = 13:17:30. المرتب المستحق = عدد الدقائق × سعر الدقيقة.</p><div class="scroll"><table><thead><tr><th>الموظف</th><th>الكود</th><th>المرتب الأساسي</th><th>أيام حضور</th><th>أيام تأخير</th><th>إجمالي التأخير</th><th>إجمالي العمل (س:د:ث)</th><th>إجمالي (عشري)</th><th>الصافي</th><th>سعر الدقيقة</th><th>المستحق</th><th>تفاصيل</th></tr></thead><tbody id="monthly"></tbody></table></div><div id="monthlyDetails" class="hidden" style="margin-top:16px"></div></section>
@@ -18,38 +21,19 @@ const $=id=>document.getElementById(id);let logsCache=[],employeesCache=[],month
 async function api(url,opts={}){const r=await fetch(url,{headers:{'Content-Type':'application/json'},...opts});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'حصل خطأ');return d}
 function message(id,text,good=false){$(id).textContent=text;$(id).className='notice '+(good?'good':'');$(id).classList.remove('hidden')}
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-function safeDate(v){
-  if(!v) return null;
-  if(typeof v === 'string' && /^\d{1,2}:\d{2}(:\d{2})?$/.test(v.trim())) return null;
-  const d = new Date(v);
-  return isNaN(d.getTime()) ? null : d;
-}
-function fmt(v){
-  if(!v) return '-';
-  if(typeof v === 'string' && /^\d{1,2}:\d{2}/.test(v)) return v;
-  const d = safeDate(v);
-  if(!d) return String(v);
-  return d.toLocaleString('ar-EG',{timeZone:'Africa/Cairo'});
-}
-function fmtDateOnly(v){
-  if(!v) return '-';
-  if(typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
-  const d = safeDate(v);
-  if(!d) return String(v);
-  return d.toLocaleDateString('ar-EG',{timeZone:'Africa/Cairo'});
-}
-function fmtTimeOnly(v){
-  if(!v) return '-';
-  const s = String(v).trim();
-  if(/^\d{1,2}:\d{2}(:\d{2})?$/.test(s)) return s;
-  const d = safeDate(v);
-  if(!d) return String(v);
-  return d.toLocaleTimeString('ar-EG',{timeZone:'Africa/Cairo', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false});
-}
+function safeDate(v){ if(!v) return null; if(typeof v === 'string' && /^\d{1,2}:\d{2}(:\d{2})?$/.test(v.trim())) return null; const d = new Date(v); return isNaN(d.getTime()) ? null : d; }
+function fmt(v){ if(!v) return '-'; if(typeof v === 'string' && /^\d{1,2}:\d{2}/.test(v)) return v; const d = safeDate(v); if(!d) return String(v); return d.toLocaleString('ar-EG',{timeZone:'Africa/Cairo'}); }
+function fmtDateOnly(v){ if(!v) return '-'; if(typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) return v; const d = safeDate(v); if(!d) return String(v); return d.toLocaleDateString('ar-EG',{timeZone:'Africa/Cairo'}); }
+function fmtTimeOnly(v){ if(!v) return '-'; const s = String(v).trim(); if(/^\d{1,2}:\d{2}(:\d{2})?$/.test(s)) return s; const d = safeDate(v); if(!d) return String(v); return d.toLocaleTimeString('ar-EG',{timeZone:'Africa/Cairo', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false}); }
 $('loginForm').onsubmit=async e=>{e.preventDefault();try{await api('/api/admin/login',{method:'POST',body:JSON.stringify({username:$('username').value,password:$('password').value})});$('login').classList.add('hidden');$('app').classList.remove('hidden');await loadAll()}catch(e){message('loginMsg',e.message)}};
 async function check(){try{await api('/api/admin/me');$('login').classList.add('hidden');$('app').classList.remove('hidden');await loadAll()}catch(e){}}
 async function logout(){await api('/api/admin/logout',{method:'POST'});location.reload()}
-async function loadAll(){try{await Promise.all([loadLogs(),loadEmployees(),loadBranches()]);const now=new Date();$('reportMonth').value=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`; }catch(e){message('status',e.message)}}
+async function loadAll(){try{await Promise.all([loadLogs(),loadEmployees(),loadBranches(),loadLeaves()]);const now=new Date();$('reportMonth').value=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`; }catch(e){message('status',e.message)}}
+
+// ==== Leaves NEW ====
+async function loadLeaves(){try{const data=await api('/api/admin/leaves');$('leaves').innerHTML=data.map(l=>`<tr><td>${esc(l.employee)}</td><td>${esc(l.code)}</td><td>${esc(l.type)}</td><td>${esc(l.leave_date)}</td><td>${esc(l.reason)}</td><td><span class="badge ${l.status==='موافق'?'badge-ok':l.status==='مرفوض'?'badge-late':''}">${esc(l.status)}</span></td><td>${esc(fmt(l.created_at))}</td><td>${l.status==='قيد المراجعة'?`<button class="small alt" onclick="updateLeave(${l.id},'موافق')">موافقة</button> <button class="small danger" onclick="updateLeave(${l.id},'مرفوض')">رفض</button>`:'-'}</td></tr>`).join('')||'<tr><td colspan="8">لا يوجد طلبات إجازات</td></tr>'}catch(e){$('leaves').innerHTML=`<tr><td colspan="8">تعذر التحميل: ${esc(e.message)}</td></tr>`}}
+async function updateLeave(id,status){try{await api('/api/admin/leaves/'+id,{method:'PATCH',body:JSON.stringify({status})});message('status','تم تحديث الإجازة إلى: '+status,true);await loadLeaves()}catch(e){message('status',e.message)}}
+
 async function loadLogs(){try{const q=new URLSearchParams();if($('from').value)q.set('from',$('from').value);if($('to').value)q.set('to',$('to').value);logsCache=await api('/api/admin/logs?'+q.toString());renderLogs()}catch(e){message('status',e.message)}}
 function renderLogs(){const s=$('search').value.trim().toLowerCase();const a=logsCache.filter(x=>[x.code,x.employee,x.branch,x.action_type].join(' ').toLowerCase().includes(s));$('count').textContent=`عدد التسجيلات المعروضة: ${a.length} (أحدث 5000 تسجيل كحد أقصى)`;$('logs').innerHTML=a.map(x=>`<tr><td>${esc(fmt(x.created_at))}</td><td>${esc(x.code)}</td><td>${esc(x.employee)}</td><td>${esc(x.branch)}</td><td>${esc(x.action_type)}</td><td>${Math.round(x.distance_m)} م</td><td>${x.late_minutes?`<span style="color:#b91c1c;font-weight:bold">${x.late_minutes} د</span>`:'-'}<\/td><td>${x.work_hours?Number(x.work_hours).toFixed(2):'-'}<\/td><td><a target="_blank" rel="noopener" href="https://maps.google.com/?q=${encodeURIComponent(x.latitude+','+x.longitude)}">عرض</a></td><\/tr>`).join('')||'<tr><td colspan="9">لا توجد تسجيلات مطابقة.</td><\/tr>'}
 $('search').addEventListener('input',renderLogs);

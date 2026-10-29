@@ -4,18 +4,28 @@
 <style>
 *{box-sizing:border-box}body{margin:0;background:#f1f5f9;font-family:Tahoma,Arial,sans-serif;color:#182433;min-height:100vh;display:grid;place-items:center;padding:18px}
 .card{background:#fff;width:min(100%,480px);padding:24px;border-radius:18px;box-shadow:0 12px 36px #102a4315}h1{margin:0 0 8px;color:#17324d;font-size:25px}p{line-height:1.7;color:#526173}.sub{margin-top:0}
-label{display:block;font-weight:bold;margin:16px 0 7px}input,select,button{width:100%;padding:13px;border:1px solid #ccd5df;border-radius:10px;font:inherit}button{border:0;background:#176b4d;color:#fff;font-weight:bold;cursor:pointer;margin-top:16px;transition:.2s}button.secondary{background:#17324d}button:disabled{opacity:.9;background:#111 !important;color:#fff;cursor:not-allowed}button.done{opacity:.9;background:#111 !important} .actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}.actions button{margin-top:14px}.notice{padding:12px;border-radius:10px;background:#f4f7fa;margin-top:16px;white-space:pre-wrap;line-height:1.7}.ok{background:#e7f8ee;color:#11643b}.bad{background:#fff0ef;color:#a3261d}.small{font-size:12px;color:#64748b}
+label{display:block;font-weight:bold;margin:16px 0 7px}input,select,button,textarea{width:100%;padding:13px;border:1px solid #ccd5df;border-radius:10px;font:inherit}button{border:0;background:#176b4d;color:#fff;font-weight:bold;cursor:pointer;margin-top:16px;transition:.2s}button.secondary{background:#17324d}button.tertiary{background:#8B5E3C}button.fourth{background:#2E7D32}button:disabled{opacity:.9;background:#111 !important;color:#fff;cursor:not-allowed}button.done{opacity:.9;background:#111 !important} .actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}.actions button{margin-top:14px}.notice{padding:12px;border-radius:10px;background:#f4f7fa;margin-top:16px;white-space:pre-wrap;line-height:1.7}.ok{background:#e7f8ee;color:#11643b}.bad{background:#fff0ef;color:#a3261d}.small{font-size:12px;color:#64748b}
+#leaveForm,#myLogs{display:none;margin-top:16px;padding:16px;border-radius:12px;background:#f8fafc;border:1px solid #e2e8f0}
+table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border:1px solid #ddd;padding:8px;font-size:13px;text-align:center}th{background:#17324d;color:#fff}
 </style></head><body><main class="card"><img src="logo.png" style="width:110px; display:block; margin:0 auto 16px;"><h1>شركة الفرقان</h1><p class="sub">نظام تسجيل الحضور والانصراف</p>
 <label for="code">كود الموظف</label><input id="code" autocomplete="username" maxlength="40" placeholder="اكتب كود الموظف">
 <label for="pin">الرقم السري للموظف</label><input id="pin" type="password" autocomplete="current-password" maxlength="100" placeholder="اكتب الرقم السري">
 <label for="branch">الفرع</label><select id="branch"><option value="">جارٍ تحميل الفروع...</option></select>
 <div class="actions"><button id="in" onclick="submitAttendance('حضور')">تسجيل حضور</button><button id="out" class="secondary" onclick="submitAttendance('انصراف')">تسجيل انصراف</button></div>
+<div class="actions"><button class="tertiary" onclick="toggleLeave()">طلب اجازة</button><button class="fourth" onclick="loadMyAttendance()">سجلي (30 يوم)</button></div>
+<div id="leaveForm">
+<h3 style="margin:0 0 10px">طلب اجازة جديد</h3>
+<label>نوع الاجازة</label><select id="lType"><option value="اعتيادية">اعتيادية</option><option value="عارضة">عارضة</option><option value="مرضية">مرضية</option><option value="سنوية">سنوية</option></select>
+<label>تاريخ الاجازة</label><input id="lDate" type="date">
+<label>السبب</label><textarea id="lReason" rows="3" placeholder="اكتب سبب الاجازة"></textarea>
+<button onclick="sendLeave()">ارسال الطلب</button>
+</div>
+<div id="myLogs"></div>
 <div id="message" class="notice" role="status">اختر الفرع واسمح للموقع بالوصول إلى GPS عند التسجيل.</div>
 <p class="small">لن تظهر لك سجلات الموظفين الآخرين. للإدارة صفحة منفصلة ومحمية.</p></main>
 <script>
 const $=id=>document.getElementById(id);
 const todayKey = ()=> new Date().toISOString().slice(0,10);
-
 function getStoredStatus(){
   const code = $('code').value.trim();
   if(!code) return {in:false,out:false};
@@ -51,7 +61,6 @@ function applyButtonsState(){
     $('out').classList.remove('done');
   }
 }
-
 async function loadBranches(){try{const r=await fetch('/api/branches');const data=await r.json();$('branch').innerHTML='<option value="">اختر الفرع</option>'+data.map(b=>`<option value="${b.id}" ${!b.configured?'disabled':''}>${escapeHtml(b.name)}${!b.configured?' — غير مجهز':''}</option>`).join('')}catch(e){$('branch').innerHTML='<option value="">تعذر تحميل الفروع</option>'}}
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function show(msg,ok){$('message').textContent=msg;$('message').className='notice '+(ok?'ok':'bad')}
@@ -59,24 +68,54 @@ function getLocation(){return new Promise((resolve,reject)=>{if(!navigator.geolo
 async function submitAttendance(action){
   const code=$('code').value.trim(),pin=$('pin').value,branchId=$('branch').value;
   if(!code||!pin||!branchId)return show('اكتب كود الموظف والرقم السري واختر فرعًا مجهزًا.',false);
-  
   const st = getStoredStatus();
   if(action==='حضور' && st.in) return show('انت سجلت حضور اليوم خلاص ✓', true);
   if(action==='انصراف' && st.out) return show('انت سجلت انصراف اليوم خلاص ✓', true);
-
   $('in').disabled=$('out').disabled=true;show('جارٍ تحديد الموقع والتحقق من التسجيل...',true);
   try{
     const loc=await getLocation();
     const r=await fetch('/api/attendance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code,pin,branchId:Number(branchId),action,...loc})});
     const data=await r.json();
     if(!r.ok)throw new Error(data.error||'تعذر التسجيل.');
-    show(`${data.message}\nالفرع: ${data.branch}\nالوقت: ${data.time}`,true);
+    const branchEl = $('branch');
+    const selectedBranchName = branchEl.options[branchEl.selectedIndex]?.text;
+    const branchName = data.branch || data.branch_name || selectedBranchName;
+    show(`${data.message}\nالفرع: ${branchName}\nالوقت: ${data.time}`,true);
     if(action==='حضور') setStoredStatus(true,false);
     else setStoredStatus(false,true);
     $('pin').value='';
   }catch(e){show(e.message||'حدث خطأ.',false); applyButtonsState();}
 }
-
+function toggleLeave(){
+  const f=$('myLogs'); f.style.display='none';
+  const el=$('leaveForm');
+  el.style.display= el.style.display==='block' ? 'none' : 'block';
+}
+async function sendLeave(){
+ const code=$('code').value.trim(), pin=$('pin').value, type=$('lType').value, date=$('lDate').value, reason=$('lReason').value.trim();
+ if(!code||!pin||!date||!reason) return show('اكمل بيانات الاجازة (الكود والباسورد والتاريخ والسبب)',false);
+ show('جارٍ إرسال طلب الاجازة...',true);
+ try{
+  const r=await fetch('/api/leave',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code,pin,type,date,reason})});
+  const j=await r.json(); if(!r.ok) throw new Error(j.error);
+  show(j.message,true); $('leaveForm').style.display='none'; $('lReason').value='';
+ }catch(e){ show(e.message,false); }
+}
+async function loadMyAttendance(){
+ const code=$('code').value.trim(), pin=$('pin').value;
+ if(!code||!pin) return show('اكتب الكود والرقم السري أولاً',false);
+ $('leaveForm').style.display='none';
+ show('جارٍ تحميل سجلك...',true);
+ try{
+  const r=await fetch(`/api/my-attendance?code=${encodeURIComponent(code)}&pin=${encodeURIComponent(pin)}`);
+  const j=await r.json(); if(!r.ok) throw new Error(j.error);
+  let html=`<h3>سجل ${j.employee} - 30 يوم</h3><table><tr><th>تاريخ</th><th>حضور</th><th>انصراف</th><th>حالة</th></tr>`;
+  j.records.forEach(x=>{ html+=`<tr><td>${x.date}</td><td>${x.in}</td><td>${x.out}</td><td>${x.status}</td></tr>`; });
+  html+='</table>';
+  $('myLogs').innerHTML=html; $('myLogs').style.display='block';
+  show('تم تحميل السجل ✓',true);
+ }catch(e){ show(e.message,false); }
+}
 $('code').addEventListener('input', applyButtonsState);
 $('code').addEventListener('change', applyButtonsState);
 loadBranches();

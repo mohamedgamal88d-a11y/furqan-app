@@ -93,6 +93,15 @@ async function initDb() {
       distance_m DOUBLE PRECISION NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS leave_requests (
+      id BIGSERIAL PRIMARY KEY,
+      employee_id INTEGER NOT NULL REFERENCES employees(id),
+      type TEXT NOT NULL,
+      leave_date DATE NOT NULL,
+      reason TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'قيد المراجعة',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
   `);
   await pool.query(`ALTER TABLE employees ADD COLUMN IF NOT EXISTS salary NUMERIC NOT NULL DEFAULT 0;`);
   await pool.query(`ALTER TABLE attendance_logs ADD COLUMN IF NOT EXISTS late_minutes INTEGER NOT NULL DEFAULT 0;`);
@@ -279,8 +288,71 @@ app.post("/api/attendance", async (req, res) => {
     if (action === "انصراف") msg += `ساعات العمل: ${workHours} ساعة\n`;
     msg += when;
     await sendTelegram(msg);
-    return res.json({ ok: true, message: `تم تسجيل ${action} بنجاح.` + (lateMinutes > 0 ? ` متأخر ${lateMinutes} دقيقة.` : ''), time: when, autoUpdated: false, lateMinutes, workHours });
+    return res.json({ ok: true, message: `تم تسجيل ${action} بنجاح.` + (lateMinutes > 0 ? ` متأخر ${lateMinutes} دقيقة.` : ''), time: when, branch: branch.name, branch_name: branch.name, branchName: branch.name, autoUpdated: false, lateMinutes, workHours });
   } catch (e) { console.error("Attendance error:", e); return res.status(500).json({ error: "حصل خطأ داخلي أثناء تسجيل البصمة." }); }
+});
+
+// ==================== APIs لوحة الموظف - 3 زراير ====================
+app.post("/api/leave", async (req, res) => {
+  try {
+    const code = cleanText(req.body.code, 40); const pin = String(req.body.pin || "");
+    const type = cleanText(req.body.type, 30); const leaveDate = cleanText(req.body.date, 10);
+    const reason = cleanText(req.body.reason, 500);
+    if (!code || !pin || !type || !leaveDate || !reason) return res.status(400).json({ error: "أكمل بيانات الإجازة" });
+    const er = await pool.query(`SELECT id, name, pin_hash FROM employees WHERE code = $1 AND active = true`, [code]);
+    if (!er.rowCount || !(await bcrypt.compare(pin, er.rows[0].pin_hash))) return res.status(401).json({ error: "كود الموظف أو الرقم السري غير صحيح." });
+    const employee = er.rows[0];
+    const saved = await pool.query(`INSERT INTO leave_requests (employee_id, type, leave_date, reason) VALUES ($1,$2,$3,$4) RETURNING id, created_at`, [employee.id, type, leaveDate, reason]);
+    await sendTelegram(`طلب إجازة جديد\n${employee.name} (${code})\nالنوع: ${type}\nالتاريخ: ${leaveDate}\nالسبب: ${reason}`);
+    res.json({ ok: true, message: "تم إرسال طلب الإجازة بنجاح", id: saved.rows[0].id });
+  } catch (e) { console.error("Leave error:", e); res.status(500).json({ error: "تعذر إرسال طلب الإجازة" }); }
+});
+
+app.get("/api/my-attendance", async (req, res) => {
+  try {
+    const code = cleanText(req.query.code, 40); const pin = String(req.query.pin || "");
+    if (!code || !pin) return res.status(400).json({ error: "كود الموظف والرقم السري مطلوب" });
+    const er = await pool.query(`SELECT id, name, pin_hash FROM employees WHERE code = $1 AND active = true`, [code]);
+    if (!er.rowCount || !(await bcrypt.compare(pin, er.rows[0].pin_hash))) return res.status(401).json({ error: "كود الموظف أو الرقم السري غير صحيح." });
+    const employee = er.rows[0];
+    const logs = await pool.query(`
+      SELECT (l.created_at AT TIME ZONE 'Africa/Cairo')::date as work_date,
+             to_char(MIN(l.created_at) FILTER (WHERE l.action_type='حضور') AT TIME ZONE 'Africa/Cairo','HH24:MI') as in_time,
+             to_char(MAX(l.created_at) FILTER (WHERE l.action_type='انصراف') AT TIME ZONE 'Africa/Cairo','HH24:MI') as out_time,
+             COALESCE(MAX(l.late_minutes) FILTER (WHERE l.action_type='حضور'),0) as late,
+             COALESCE(MAX(l.work_hours) FILTER (WHERE l.action_type='انصراف'),0) as work_hours
+      FROM attendance_logs l
+      WHERE l.employee_id = $1 AND (l.created_at AT TIME ZONE 'Africa/Cairo') >= (NOW() AT TIME ZONE 'Africa/Cairo') - INTERVAL '30 days'
+      GROUP BY work_date ORDER BY work_date DESC
+    `, [employee.id]);
+    const records = logs.rows.map(r => {
+      const dateStr = new Date(r.work_date).toISOString().slice(0,10);
+      const status = !r.in_time ? 'غائب' : (r.late > 0 ? 'متأخر' : 'حاضر');
+      return { date: dateStr, in: r.in_time || '-', out: r.out_time || '-', late: r.late, work_hours: r.work_hours, status };
+    });
+    res.json({ ok: true, employee: employee.name, code, records });
+  } catch (e) { console.error("my-attendance error:", e); res.status(500).json({ error: "تعذر تحميل السجل" }); }
+});
+
+// ==================== APIs إدارة الإجازات - جديد ====================
+app.get("/api/admin/leaves", requireAdmin, async (_req, res) => {
+  try {
+    const r = await pool.query(`SELECT l.id, e.code, e.name AS employee, l.type, l.leave_date, l.reason, l.status, l.created_at FROM leave_requests l JOIN employees e ON e.id = l.employee_id ORDER BY l.created_at DESC LIMIT 500`);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: "تعذر تحميل الإجازات" }); }
+});
+
+app.patch("/api/admin/leaves/:id", requireAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const status = cleanText(req.body.status, 20);
+    if (!["موافق","مرفوض","قيد المراجعة"].includes(status)) return res.status(400).json({ error: "حالة غير صحيحة" });
+    const r = await pool.query(`UPDATE leave_requests SET status=$1 WHERE id=$2 RETURNING *`, [status, id]);
+    if (!r.rowCount) return res.status(404).json({ error: "الطلب غير موجود" });
+    const emp = await pool.query(`SELECT e.name FROM employees e JOIN leave_requests l ON l.employee_id=e.id WHERE l.id=$1`, [id]);
+    await sendTelegram(`تحديث إجازة\nالموظف: ${emp.rows[0]?.name}\nالحالة: ${status}`);
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: "تعذر تحديث الإجازة" }); }
 });
 
 app.get("/api/admin/stats", requireAdmin, async (_req, res) => {
@@ -348,12 +420,10 @@ app.post("/api/admin/employees/:id/pin", requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: "تعذر تغيير الرقم السري" }); }
 });
 
-// ==================== تقرير شهري FIXED - الصافي = الإجمالي الصحيح بدون خصم مزدوج ====================
 app.get("/api/admin/reports/monthly", requireAdmin, async (req, res) => {
   try {
     const month = cleanText(req.query.month, 7);
     if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: "صيغة الشهر غير صحيحة YYYY-MM" });
-    
     const r = await pool.query(`
       WITH daily AS (
         SELECT e.id as employee_id, e.code, e.name, e.salary,
@@ -371,77 +441,24 @@ app.get("/api/admin/reports/monthly", requireAdmin, async (req, res) => {
         json_agg(json_build_object('date', work_date, 'first_in', first_in, 'last_out', last_out, 'first_in_cairo', first_in_cairo, 'last_out_cairo', last_out_cairo) ORDER BY work_date) FILTER (WHERE work_date IS NOT NULL) as daily_details
       FROM daily GROUP BY employee_id, code, name, salary ORDER BY name
     `, [month]);
-
     const data = r.rows.map(row => {
-      let totalLateSeconds = 0;
-      let lateDays = 0;
+      let totalLateSeconds = 0; let lateDays = 0;
       const daily = (row.daily_details || []).map(d => {
         const firstIn = d.first_in ? new Date(d.first_in) : null;
         const lastOut = d.last_out ? new Date(d.last_out) : null;
         const inP = toCairoParts(firstIn);
         let lateInSec = 0;
-        if(inP){
-          if(inP.h > WORK_START_HOUR) lateInSec = (inP.h-WORK_START_HOUR)*3600+inP.m*60+inP.s;
-          else if(inP.h===WORK_START_HOUR) lateInSec = inP.m*60+inP.s;
-        }
+        if(inP){ if(inP.h > WORK_START_HOUR) lateInSec = (inP.h-WORK_START_HOUR)*3600+inP.m*60+inP.s; else if(inP.h===WORK_START_HOUR) lateInSec = inP.m*60+inP.s; }
         let workSec = 0;
         if(firstIn && lastOut) workSec = Math.max(0, Math.floor((lastOut-firstIn)/1000));
-        if(lateInSec>0) lateDays++;
-        totalLateSeconds+=lateInSec;
-        
-        return {
-          date: d.date,
-          work_date: d.date,
-          first_in: d.first_in,
-          last_out: d.last_out,
-          first_in_cairo: d.first_in_cairo,
-          last_out_cairo: d.last_out_cairo,
-          حضور: d.first_in_cairo || '--',
-          انصراف: d.last_out_cairo || '--',
-          in: d.first_in_cairo,
-          out: d.last_out_cairo,
-          inT: d.first_in_cairo,
-          outT: d.last_out_cairo,
-          late: lateInSec>0?Math.floor(lateInSec/60):0,
-          lateInSeconds: lateInSec,
-          lateInHMS: formatHMS(lateInSec),
-          seconds: workSec,
-          hours_hms: formatHMS(workSec),
-          hours: formatHMS(workSec),
-          hours_decimal: workSec?parseFloat((workSec/3600).toFixed(2)):0
-        };
+        if(lateInSec>0) lateDays++; totalLateSeconds+=lateInSec;
+        return { date: d.date, work_date: d.date, first_in: d.first_in, last_out: d.last_out, first_in_cairo: d.first_in_cairo, last_out_cairo: d.last_out_cairo, حضور: d.first_in_cairo || '--', انصراف: d.last_out_cairo || '--', in: d.first_in_cairo, out: d.last_out_cairo, inT: d.first_in_cairo, outT: d.last_out_cairo, late: lateInSec>0?Math.floor(lateInSec/60):0, lateInSeconds: lateInSec, lateInHMS: formatHMS(lateInSec), seconds: workSec, hours_hms: formatHMS(workSec), hours: formatHMS(workSec), hours_decimal: workSec?parseFloat((workSec/3600).toFixed(2)):0 };
       });
-      
       const totalSeconds = parseFloat(row.total_work_seconds)||0;
       const salary = parseFloat(row.salary)||0;
-      const dailyRate = salary/30;
-      const hourlyRate = dailyRate/8;
-      const minuteRate = hourlyRate/60;
-      
-      // FIX: الصافي = الإجمالي - بدون خصم مزدوج للعجز
+      const dailyRate = salary/30; const hourlyRate = dailyRate/8; const minuteRate = hourlyRate/60;
       const netSeconds = totalSeconds;
-
-      return {
-        ...row,
-        total_work_seconds: totalSeconds,
-        total_work_hms: formatHMS(totalSeconds),
-        total_work_hours: parseFloat((totalSeconds/3600).toFixed(2)),
-        net_work_hms: formatHMS(netSeconds),
-        net_work_seconds: netSeconds,
-        total_late_seconds: totalLateSeconds,
-        total_late_hms: formatHMS(totalLateSeconds),
-        total_late_minutes: Math.floor(totalLateSeconds/60),
-        total_shortage_hms: "00:00:00",
-        present_days: parseInt(row.present_days)||0,
-        late_days: lateDays,
-        daily_details: daily,
-        rates: { per_minute: parseFloat(minuteRate.toFixed(2)), per_hour: parseFloat(hourlyRate.toFixed(2)), per_day: parseFloat(dailyRate.toFixed(2)) },
-        deserved_salary: parseFloat((Math.floor(totalSeconds/60)*minuteRate).toFixed(2)),
-        net_salary: parseFloat((Math.floor(netSeconds/60)*minuteRate).toFixed(2)),
-        صافي: parseFloat((Math.floor(netSeconds/60)*minuteRate).toFixed(2)),
-        مستحق: parseFloat((Math.floor(totalSeconds/60)*minuteRate).toFixed(2)),
-        إجمالي: formatHMS(totalSeconds)
-      };
+      return { ...row, total_work_seconds: totalSeconds, total_work_hms: formatHMS(totalSeconds), total_work_hours: parseFloat((totalSeconds/3600).toFixed(2)), net_work_hms: formatHMS(netSeconds), net_work_seconds: netSeconds, total_late_seconds: totalLateSeconds, total_late_hms: formatHMS(totalLateSeconds), total_late_minutes: Math.floor(totalLateSeconds/60), total_shortage_hms: "00:00:00", present_days: parseInt(row.present_days)||0, late_days: lateDays, daily_details: daily, rates: { per_minute: parseFloat(minuteRate.toFixed(2)), per_hour: parseFloat(hourlyRate.toFixed(2)), per_day: parseFloat(dailyRate.toFixed(2)) }, deserved_salary: parseFloat((Math.floor(totalSeconds/60)*minuteRate).toFixed(2)), net_salary: parseFloat((Math.floor(netSeconds/60)*minuteRate).toFixed(2)) };
     });
     res.json({ month, workConfig: { start: `${WORK_START_HOUR}:00`, end: `${WORK_END_HOUR}:00`, hours: 8 }, data });
   } catch (e) { console.error(e); res.status(500).json({ error: "تعذر تحميل التقرير الشهري" }); }
@@ -476,33 +493,11 @@ app.post("/api/admin/branches", requireAdmin, async (req, res) => {
 
 app.get("/api/admin/export.csv", requireAdmin, async (_req, res) => {
   try {
-    const r = await pool.query(`
-      SELECT 
-        e.code as "كود الموظف",
-        e.name AS "اسم الموظف",
-        b.name AS "الفرع",
-        l.action_type AS "نوع التسجيل",
-        (l.created_at AT TIME ZONE 'Africa/Cairo')::text AS "التاريخ والوقت",
-        l.late_minutes AS "تأخير دقايق",
-        l.work_hours AS "ساعات عمل",
-        l.distance_m AS "المسافة"
-      FROM attendance_logs l 
-      JOIN employees e ON e.id = l.employee_id 
-      JOIN branches b ON b.id = l.branch_id 
-      ORDER BY l.created_at DESC
-    `);
+    const r = await pool.query(`SELECT e.code as "كود الموظف", e.name AS "اسم الموظف", b.name AS "الفرع", l.action_type AS "نوع التسجيل", (l.created_at AT TIME ZONE 'Africa/Cairo')::text AS "التاريخ والوقت", l.late_minutes AS "تأخير دقايق", l.work_hours AS "ساعات عمل", l.distance_m AS "المسافة" FROM attendance_logs l JOIN employees e ON e.id = l.employee_id JOIN branches b ON b.id = l.branch_id ORDER BY l.created_at DESC`);
     if(!r.rows.length) return res.status(404).send("مفيش بيانات");
-    const cols = Object.keys(r.rows[0]);
-    const header = cols.join(";");
-    const csvRows = r.rows.map(row => cols.map(k => `"${String(row[k] ?? "").replace(/"/g, '""')}"`).join(";")).join("\r\n");
-    const csv = "sep=;\r\n" + header + "\r\n" + csvRows;
-    res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader("Content-Disposition", 'attachment; filename="furqan-attendance.csv"');
-    res.send("\uFEFF" + csv);
-  } catch (e) { 
-    console.error(e);
-    res.status(500).json({ error: "تعذر تصدير السجل" }); 
-  }
+    const cols = Object.keys(r.rows[0]); const header = cols.join(";"); const csvRows = r.rows.map(row => cols.map(k => `"${String(row[k] ?? "").replace(/"/g, '""')}"`).join(";")).join("\r\n"); const csv = "sep=;\r\n" + header + "\r\n" + csvRows;
+    res.setHeader("Content-Type", "text/csv; charset=utf-8"); res.setHeader("Content-Disposition", 'attachment; filename="furqan-attendance.csv"'); res.send("\uFEFF" + csv);
+  } catch (e) { console.error(e); res.status(500).json({ error: "تعذر تصدير السجل" }); }
 });
 
 app.get("/admin", (_req, res) => { res.sendFile(path.join(__dirname, "public", "admin.html")); });
