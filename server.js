@@ -503,7 +503,7 @@ app.post("/api/admin/branches", requireAdmin, async (req, res) => {
 
 app.get("/api/admin/export.csv", requireAdmin, async (_req, res) => {
   try {
-    const r = await pool.query(`SELECT e.code as "كود الموظف", e.name as "اسم الموظف", a.time as "الوقت", a.type as "النوع", b.name as "الفرع" FROM attendance a JOIN employees e ON e.id=a.employee_id LEFT JOIN branches b ON b.id=a.branch_id ORDER BY a.time DESC`);
+    const r = await pool.query('SELECT e.code as "كود الموظف", e.name as "اسم الموظف", a.time as "الوقت", a.type as "النوع", b.name as "الفرع" FROM attendance a JOIN employees e ON e.id=a.employee_id LEFT JOIN branches b ON b.id=a.branch_id ORDER BY a.time DESC');
     if(!r.rows.length) return res.status(404).send("مفيش بيانات");
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('الحضور');
