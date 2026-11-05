@@ -87,7 +87,7 @@ th{background:#0F2A4A;color:#E8C86A}
         <div class="cardBtn" onclick="openSection('leave')"><div class="iconWrap">📝</div><div class="txt"><h3>تقديم طلب إجازة</h3><p>اطلب إجازتك قبلها بيومين على الأقل</p></div><div class="arrow">‹</div></div>
         <div class="cardBtn" onclick="openSection('history')"><div class="iconWrap">📊</div><div class="txt"><h3>سجل الحضور والغياب بتاعي</h3><p>عرض سجل آخر 30 يوم</p></div><div class="arrow">‹</div></div>
       </div>
-      <div id="section-attendance" class="section hidden"><h3>📍 تسجيل الحضور والانصراف</h3><div class="actions2"><button id="in" class="btn btnPrimary" onclick="submitAttendance('حضور')">تسجيل حضور</button><button id="out" class="btn btnDark" onclick="submitAttendance('انصراف')">تسجيل انصراف</button></div><p class="small">سيتم التحقق من موقعك GPS للتأكد من تواجدك في الفرع</p></div>
+      <div id="section-attendance" class="section hidden"><h3>📍 تسجيل الحضور والانصراف</h3><div class="actions2"><button id="in" class="btn btnPrimary" onclick="submitAttendance('حضور')">تسجيل حضور</button><button id="out" class="btn btnDark" onclick="submitAttendance('انصراف')">تسجيل انصراف</button></div><p class="small">سيتم التحقق من موقعك GPS للتأكد من تواجدك في الفرع</p><p class="small">🔐 سيطلب منك بصمة الصباع / الوجه للتأكد ان ده موبايلك</p></div>
       <div id="section-leave" class="section hidden"><h3>📝 طلب إجازة جديد</h3><div id="leaveForm" style="display:block;border:0;padding:0;background:transparent"><label>نوع الإجازة</label><select id="lType"><option value="اعتيادية">اعتيادية</option><option value="عارضة">عارضة</option><option value="مرضية">مرضية</option><option value="سنوية">سنوية</option></select><label>تاريخ الإجازة</label><input id="lDate" type="date"><label>السبب</label><textarea id="lReason" rows="3" placeholder="اكتب سبب الإجازة"></textarea><button class="btn btnPrimary" onclick="sendLeave()">ارسال الطلب</button></div></div>
       <div id="section-history" class="section hidden"><h3>📊 سجلي (30 يوم)</h3><button class="btn btnPrimary" onclick="loadMyAttendance()">عرض سجل الحضور</button><div id="myLogs" style="display:block"></div></div>
     </div>
@@ -119,6 +119,50 @@ th{background:#0F2A4A;color:#E8C86A}
 <script>
 const $=id=>document.getElementById(id);
 const todayKey = ()=> new Date().toISOString().slice(0,10);
+
+// ==== جديد ==== ربط الجهاز + بصمة الصباع ====
+// ده بيطلع رقم ثابت للموبايل ده، وبيتحفظ في الموبايل نفسه
+function getDeviceId(){
+  let id = localStorage.getItem('furqan_device_id');
+  if(!id){
+    id = 'dev_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,10);
+    localStorage.setItem('furqan_device_id', id);
+  }
+  return id;
+}
+function getDeviceName(){
+  return (navigator.userAgent || 'موبايل الموظف').slice(0,100);
+}
+// دي اللي بتطلب بصمة الصباع / الوش من الموبايل نفسه
+// شغالة على بصمة ورا، قدام، جنب، او بصمة وش - الموبايل هو اللي بيحدد
+async function verifyBiometric(){
+  try{
+    // لو المتصفح مش بيدعم البصمة، هنكمل بربط الجهاز بس عشان منوقفش الشغل
+    if(!window.PublicKeyCredential || !navigator.credentials){
+      return true;
+    }
+    // هل الموبايل فيه بصمة متسجلة اصلا؟
+    const can = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().catch(()=>false);
+    if(!can) return true; // مفيش بصمة متسجلة، هنعتمد على ربط الجهاز + PIN
+
+    const challenge = new Uint8Array(32);
+    crypto.getRandomValues(challenge);
+    await navigator.credentials.get({
+      publicKey: {
+        challenge: challenge,
+        timeout: 60000,
+        userVerification: "required",
+        rpId: location.hostname
+      }
+    });
+    return true; // البصمة صح
+  }catch(e){
+    // المستخدم لغى البصمة او البصمة غلط
+    return false;
+  }
+}
+// ==== نهاية الجديد ====
+
 function getStoredStatus(){
   const code = $('code').value.trim();
   if(!code) return {in:false,out:false,inTime:'',outTime:''};
@@ -155,8 +199,17 @@ async function submitAttendance(action){
   if(action==='انصراف' && st.out) return show('انت سجلت انصراف اليوم خلاص ✓ الساعة '+st.outTime, true);
   $('in').disabled=$('out').disabled=true;show('جارٍ تحديد الموقع والتحقق من التسجيل...',true);
   try{
+    // ==== جديد ==== 1- اطلب بصمة الصباع / الوش الاول
+    show('ضع بصمة صباعك / وشك للتأكد...',true);
+    const bioOk = await verifyBiometric();
+    if(!bioOk){
+      show('البصمة غلط او اتلغت. حاول تاني.',false);
+      applyButtonsState();
+      return;
+    }
     const loc=await getLocation();
-    const r=await fetch('/api/attendance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code,pin,branchId:Number(branchId),action,...loc})});
+    // ==== جديد ==== 2- ابعت deviceId مع البصمة للسيرفر
+    const r=await fetch('/api/attendance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code,pin,branchId:Number(branchId),action,...loc, deviceId: getDeviceId(), deviceName: getDeviceName()})});
     const data=await r.json();
     if(!r.ok)throw new Error(data.error||'تعذر التسجيل.');
     const branchEl = $('branch');const selectedBranchName = branchEl.options[branchEl.selectedIndex]?.text;const branchName = data.branch || data.branch_name || selectedBranchName;

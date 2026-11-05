@@ -11,6 +11,10 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const isProd = process.env.NODE_ENV === "production";
 
+// ==== جديد ==== زرار تشغيل / قفل ربط الجهاز
+// لو خليته false هيرجع يشتغل بالكود والـ PIN بس زي الاول بالظبط
+const DEVICE_BINDING_ENABLED =false;
+
 const MAX_RADIUS_M = 200;
 const MAX_GPS_ACCURACY_M = 100;
 const WORK_START_HOUR = 9;
@@ -106,6 +110,9 @@ async function initDb() {
   await pool.query(`ALTER TABLE employees ADD COLUMN IF NOT EXISTS salary NUMERIC NOT NULL DEFAULT 0;`);
   await pool.query(`ALTER TABLE attendance_logs ADD COLUMN IF NOT EXISTS late_minutes INTEGER NOT NULL DEFAULT 0;`);
   await pool.query(`ALTER TABLE attendance_logs ADD COLUMN IF NOT EXISTS work_hours NUMERIC DEFAULT 0;`);
+  // ==== جديد ==== ربط الجهاز - عمودين بس
+  await pool.query(`ALTER TABLE employees ADD COLUMN IF NOT EXISTS device_id TEXT;`);
+  await pool.query(`ALTER TABLE employees ADD COLUMN IF NOT EXISTS device_name TEXT;`);
 
   const branchesData = [
     {name:"A Market - الاردنيه",lat:30.295282,lng:31.745398},
@@ -258,11 +265,27 @@ app.post("/api/attendance", async (req, res) => {
   try {
     const code = cleanText(req.body.code, 40); const pin = String(req.body.pin || ""); const action = cleanText(req.body.action, 20); const branchId = Number(req.body.branchId);
     const lat = Number(req.body.latitude); const lng = Number(req.body.longitude); const accuracy = Number(req.body.accuracy);
+    // ==== جديد ==== استقبال بصمة الجهاز من الموبايل
+    const deviceId = cleanText(req.body.deviceId, 200);
+    const deviceName = cleanText(req.body.deviceName, 100);
     if (!code || !pin || !Number.isInteger(branchId) || branchId <= 0 || !["حضور", "انصراف"].includes(action)) return res.status(400).json({ error: "راجع بيانات الموظف والفرع ونوع التسجيل" });
     if (!validCoordinates(lat, lng)) return res.status(400).json({ error: "إحداثيات GPS غير صحيحة. فعّل الموقع وحاول مرة أخرى." });
     if (!Number.isFinite(accuracy) || accuracy < 0 || accuracy > MAX_GPS_ACCURACY_M) return res.status(400).json({ error: "دقة الموقع ضعيفة. افتح GPS وحاول مرة أخرى." });
-    const er = await pool.query(`SELECT id, name, pin_hash FROM employees WHERE code = $1 AND active = true`, [code]);
+    // ==== جديد ==== لو ربط الجهاز شغال لازم يبعت deviceId
+    if (DEVICE_BINDING_ENABLED && !deviceId) return res.status(400).json({ error: "جهازك مش متعرف عليه. افتح الصفحة من جديد وحاول تاني." });
+    const er = await pool.query(`SELECT id, name, pin_hash, device_id FROM employees WHERE code = $1 AND active = true`, [code]);
     if (!er.rowCount || !(await bcrypt.compare(pin, er.rows[0].pin_hash))) return res.status(401).json({ error: "كود الموظف أو الرقم السري غير صحيح." });
+    // ==== جديد ==== منطق ربط الجهاز
+    if (DEVICE_BINDING_ENABLED) {
+      const savedDeviceId = er.rows[0].device_id;
+      if (!savedDeviceId) {
+        // اول مرة - اربط الجهاز ده بالموظف
+        await pool.query(`UPDATE employees SET device_id=$1, device_name=$2 WHERE id=$3`, [deviceId, deviceName || "موبايل الموظف", er.rows[0].id]);
+      } else if (savedDeviceId !== deviceId) {
+        // موبايل تاني - ارفض
+        return res.status(403).json({ error: "ده مش موبايلك المسجل. مينفعش تبصم من جهاز تاني. كلم الإدارة تفك ربط الجهاز القديم." });
+      }
+    }
     const br = await pool.query(`SELECT id, name, latitude, longitude, radius_m FROM branches WHERE id = $1 AND active = true`, [branchId]);
     if (!br.rowCount || br.rows[0].latitude === null || br.rows[0].longitude === null || !validCoordinates(Number(br.rows[0].latitude), Number(br.rows[0].longitude))) return res.status(400).json({ error: "إحداثيات الفرع غير مضبوطة. تواصل مع الإدارة." });
     const employee = er.rows[0]; const branch = br.rows[0];
@@ -386,7 +409,7 @@ app.get("/api/admin/logs", requireAdmin, async (req, res) => {
 });
 
 app.get("/api/admin/employees", requireAdmin, async (_req, res) => {
-  try { const r = await pool.query("SELECT id,code,name,active,salary FROM employees ORDER BY name"); res.json(r.rows); } catch (e) { res.status(500).json({ error: "تعذر تحميل الموظفين" }); }
+  try { const r = await pool.query("SELECT id,code,name,active,salary,device_id,device_name FROM employees ORDER BY name"); res.json(r.rows); } catch (e) { res.status(500).json({ error: "تعذر تحميل الموظفين" }); }
 });
 
 app.post("/api/admin/employees", requireAdmin, async (req, res) => {
@@ -428,6 +451,18 @@ app.post("/api/admin/employees/:id/pin", requireAdmin, async (req, res) => {
     if (!r.rowCount) return res.status(404).json({ error: "الموظف غير موجود." });
     res.json({ ok: true, message: "تم تغيير الرقم السري للموظف بنجاح." });
   } catch (e) { res.status(500).json({ error: "تعذر تغيير الرقم السري" }); }
+});
+
+// ==== جديد ==== فك ربط جهاز موظف - للادمن بس
+// لما موبايل الموظف يبوظ او يتغير، دوس الزرار ده من لوحة الادمن
+app.post("/api/admin/employees/:id/unbind-device", requireAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "بيانات الموظف غير صحيحة." });
+    const r = await pool.query("UPDATE employees SET device_id = NULL, device_name = NULL WHERE id=$1 RETURNING id,code,name", [id]);
+    if (!r.rowCount) return res.status(404).json({ error: "الموظف غير موجود." });
+    res.json({ ok: true, message: "تم فك ربط الجهاز. الموظف يقدر يربط موبايل جديد في اول بصمة جاية." });
+  } catch (e) { res.status(500).json({ error: "تعذر فك ربط الجهاز" }); }
 });
 
 app.get("/api/admin/reports/monthly", requireAdmin, async (req, res) => {
