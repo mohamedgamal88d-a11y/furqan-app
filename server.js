@@ -13,7 +13,7 @@ const isProd = process.env.NODE_ENV === "production";
 
 // ==== جديد ==== زرار تشغيل / قفل ربط الجهاز
 // لو خليته false هيرجع يشتغل بالكود والـ PIN بس زي الاول بالظبط
-const DEVICE_BINDING_ENABLED =false;
+const DEVICE_BINDING_ENABLED =true;
 
 const MAX_RADIUS_M = 200;
 const MAX_GPS_ACCURACY_M = 100;
