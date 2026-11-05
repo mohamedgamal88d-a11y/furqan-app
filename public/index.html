@@ -57,12 +57,16 @@ th{background:#0F2A4A;color:#E8C86A}
 .hidden{display:none !important}
 #myLogs{margin-top:14px}
 .todayBox{background:linear-gradient(135deg,#F9F6EA,#FFFDF5);border:1px solid #E8D9A8;border-radius:14px;padding:14px;margin-top:10px}
-.todayRow{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px dashed #E8D9A8}
+.todayRow{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px dashed #E8D9A8;gap:8px}
 .todayRow:last-child{border-bottom:0}
 .todayRow .label{font-size:13px;color:#6B7E98}
-.todayRow .value{font-size:14px;font-weight:800;color:#0F2A4A}
+.todayRow .value{font-size:14px;font-weight:800;color:#0F2A4A;text-align:left}
 .todayRow .value.done{color:#11643B}
 .todayRow .value.not{color:#A3261D}
+.todayRow .value small{display:block;font-size:18px;font-weight:900;color:#0F2A4A;line-height:1.2;margin-top:2px;direction:ltr}
+.backBtn{background:#fff;border:1px solid #E8E0C8;color:#0F2A4A;padding:10px 14px;border-radius:12px;font-weight:800;cursor:pointer;width:auto;margin-bottom:12px}
+.pageTitle{font-size:20px;font-weight:900;color:#0F2A4A;margin:0 0 4px}
+.pageSub{font-size:13px;color:#6B7E98;margin:0 0 12px}
 </style>
 </head>
 <body>
@@ -71,9 +75,10 @@ th{background:#0F2A4A;color:#E8C86A}
     <div class="topRow">
       <div class="brand"><img src="logo.png" alt="شركة الفرقان"><div class="brandText"><h1>Al Furqan</h1><span>PREMIUM</span></div></div>
     </div>
-    <div class="welcome"><p class="hi">مرحباً, <span id="welcomeName">موظف</span> 👋</p><p class="subQ">ما الذي تريد فعله اليوم؟</p></div>
+    <div class="welcome"><p class="hi">مرحباً, <span id="welcomeName">موظف</span> 👋</p><p class="subQ" id="welcomeSub">ما الذي تريد فعله اليوم؟</p></div>
   </div>
   <div class="content">
+    <!-- ===== الرئيسية - الكروت بس ===== -->
     <div id="page-home">
       <div class="loginStrip">
         <label for="code">كود الموظف</label><input id="code" autocomplete="username" maxlength="40" placeholder="مثال: EMP001">
@@ -85,11 +90,35 @@ th{background:#0F2A4A;color:#E8C86A}
         <div class="cardBtn" onclick="openSection('leave')"><div class="iconWrap">📝</div><div class="txt"><h3>تقديم طلب إجازة</h3><p>اطلب إجازتك قبلها بيومين على الأقل</p></div><div class="arrow">‹</div></div>
         <div class="cardBtn" onclick="openSection('history')"><div class="iconWrap">📊</div><div class="txt"><h3>سجل الحضور والغياب بتاعي</h3><p>عرض سجل آخر 30 يوم</p></div><div class="arrow">‹</div></div>
       </div>
-      <div id="section-attendance" class="section hidden"><h3>📍 تسجيل الحضور والانصراف</h3><div class="actions2"><button id="in" class="btn btnPrimary" onclick="submitAttendance('حضور')">تسجيل حضور</button><button id="out" class="btn btnDark" onclick="submitAttendance('انصراف')">تسجيل انصراف</button></div><p class="small">سيتم التحقق من موقعك GPS للتأكد من تواجدك في الفرع</p><p class="small">🔐 سيطلب منك بصمة الصباع / الوجه للتأكد ان ده موبايلك</p></div>
-      <div id="section-leave" class="section hidden"><h3>📝 طلب إجازة جديد</h3><div id="leaveForm" style="display:block;border:0;padding:0;background:transparent"><label>نوع الإجازة</label><select id="lType"><option value="اعتيادية">اعتيادية</option><option value="عارضة">عارضة</option><option value="مرضية">مرضية</option><option value="سنوية">سنوية</option></select><label>تاريخ الإجازة</label><input id="lDate" type="date"><label>السبب</label><textarea id="lReason" rows="3" placeholder="اكتب سبب الإجازة"></textarea><button class="btn btnPrimary" onclick="sendLeave()">ارسال الطلب</button></div></div>
-      <div id="section-history" class="section hidden"><h3>📊 سجلي (30 يوم)</h3><button class="btn btnPrimary" onclick="loadMyAttendance()">عرض سجل الحضور</button><div id="myLogs" style="display:block"></div></div>
     </div>
+
+    <!-- ===== صفحة الحضور لوحدها ===== -->
+    <div id="page-attendance" class="hidden">
+      <button class="backBtn" onclick="goHome()">› رجوع للرئيسية</button>
+      <p class="pageTitle">📍 تسجيل الحضور والانصراف</p>
+      <p class="pageSub">هيتم التحقق من موقعك GPS والبصمة</p>
+      <div class="section" style="margin-top:0"><div class="actions2"><button id="in" class="btn btnPrimary" onclick="submitAttendance('حضور')">تسجيل حضور</button><button id="out" class="btn btnDark" onclick="submitAttendance('انصراف')">تسجيل انصراف</button></div><p class="small">سيتم التحقق من موقعك GPS للتأكد من تواجدك في الفرع</p><p class="small">🔐 سيطلب منك بصمة الصباع / الوجه للتأكد ان ده موبايلك</p></div>
+    </div>
+
+    <!-- ===== صفحة الإجازة لوحدها ===== -->
+    <div id="page-leave" class="hidden">
+      <button class="backBtn" onclick="goHome()">› رجوع للرئيسية</button>
+      <p class="pageTitle">📝 طلب إجازة جديد</p>
+      <p class="pageSub">اطلب إجازتك قبلها بيومين على الأقل</p>
+      <div class="section" style="margin-top:0"><div id="leaveForm"><label>نوع الإجازة</label><select id="lType"><option value="اعتيادية">اعتيادية</option><option value="عارضة">عارضة</option><option value="مرضية">مرضية</option><option value="سنوية">سنوية</option></select><label>تاريخ الإجازة</label><input id="lDate" type="date"><label>السبب</label><textarea id="lReason" rows="3" placeholder="اكتب سبب الإجازة"></textarea><button class="btn btnPrimary" onclick="sendLeave()">ارسال الطلب</button></div></div>
+    </div>
+
+    <!-- ===== صفحة السجل لوحدها ===== -->
+    <div id="page-history" class="hidden">
+      <button class="backBtn" onclick="goHome()">› رجوع للرئيسية</button>
+      <p class="pageTitle">📊 سجلي (30 يوم)</p>
+      <p class="pageSub">سجل حضورك وانصرافك</p>
+      <div class="section" style="margin-top:0"><button class="btn btnPrimary" onclick="loadMyAttendance()">عرض سجل الحضور</button><div id="myLogs"></div></div>
+    </div>
+
+    <!-- ===== حسابي ===== -->
     <div id="page-profile" class="hidden">
+      <button class="backBtn" onclick="goHome()">› رجوع للرئيسية</button>
       <div class="section" style="margin-top:0">
         <h3>👤 حسابي - حضور اليوم</h3>
         <div class="todayBox">
@@ -170,10 +199,10 @@ function setStoredStatus(inDone,outDone,timeStr){
   if(!code) return;
   const cur = getStoredStatus();
   const next = {
-    in: inDone || cur.in, 
+    in: inDone || cur.in,
     out: outDone || cur.out,
-    inTime: inDone ? (timeStr||new Date().toLocaleTimeString('ar-EG')) : cur.inTime,
-    outTime: outDone ? (timeStr||new Date().toLocaleTimeString('ar-EG')) : cur.outTime
+    inTime: inDone ? (timeStr||'') : cur.inTime,
+    outTime: outDone ? (timeStr||'') : cur.outTime
   };
   localStorage.setItem(`att_${code}_${todayKey()}`, JSON.stringify(next));
   applyButtonsState();updateProfileView();
@@ -186,13 +215,24 @@ function applyButtonsState(){
 async function loadBranches(){try{const r=await fetch('/api/branches');const data=await r.json();$('branch').innerHTML='<option value="">اختر الفرع</option>'+data.map(b=>`<option value="${b.id}" ${!b.configured?'disabled':''}>${escapeHtml(b.name)}${!b.configured?' — غير مجهز':''}</option>`).join('')}catch(e){$('branch').innerHTML='<option value="">تعذر تحميل الفروع</option>'}}
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function show(msg,ok){$('message').textContent=msg;$('message').className='notice '+(ok?'ok':'bad')}
+// === إصلاح الوقت: منقطعش الوقت، ناخده كامل زي ما السيرفر بعته ===
+function cleanTime(raw){
+  if(!raw) return '';
+  let s = String(raw).trim();
+  // لو السيرفر بعت تاريخ + وقت، خد آخر جزء فيه الوقت كامل مش آخر كلمة
+  // مثال: "2026/10/31 10:29:35 ص" -> "10:29:35 ص"
+  // مثال: "١٠:٢٩:٣٥ ص" -> زي ما هو
+  const m = s.match(/(\d{1,2}:\d{2}(:\d{2})?\s*[صم]?)/);
+  if(m) return m[0];
+  return s;
+}
 function getLocation(){return new Promise((resolve,reject)=>{if(!navigator.geolocation)return reject(new Error('المتصفح لا يدعم تحديد الموقع.'));navigator.geolocation.getCurrentPosition(p=>resolve({latitude:p.coords.latitude,longitude:p.coords.longitude,accuracy:p.coords.accuracy}),e=>reject(new Error(e.code===1?'اسمح للموقع بالوصول إلى GPS.':'تعذر تحديد موقعك. فعّل GPS وحاول مرة أخرى.')),{enableHighAccuracy:true,timeout:20000,maximumAge:0})})}
 async function submitAttendance(action){
   const code=$('code').value.trim(),pin=$('pin').value,branchId=$('branch').value;
   if(!code||!pin||!branchId)return show('اكتب كود الموظف والرقم السري واختر فرعًا مجهزًا.',false);
   const st = getStoredStatus();
-  if(action==='حضور' && st.in) return show('انت سجلت حضور اليوم خلاص ✓ الساعة '+st.inTime, true);
-  if(action==='انصراف' && st.out) return show('انت سجلت انصراف اليوم خلاص ✓ الساعة '+st.outTime, true);
+  if(action==='حضور' && st.in) return show('انت سجلت حضور اليوم خلاص ✓\nالساعة: '+st.inTime, true);
+  if(action==='انصراف' && st.out) return show('انت سجلت انصراف اليوم خلاص ✓\nالساعة: '+st.outTime, true);
   $('in').disabled=$('out').disabled=true;show('جارٍ تحديد الموقع والتحقق من التسجيل...',true);
   try{
     show('ضع بصمة صباعك / وشك للتأكد...',true);
@@ -203,12 +243,12 @@ async function submitAttendance(action){
       return;
     }
     const loc=await getLocation();
-    const r=await fetch('/api/attendance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code,pin,branchId:Number(branchId),action,...loc, deviceId: getDeviceId(), deviceName: getDeviceName()})});
+    const r=await fetch('/api/attendance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code,pin,branchId:Number(branchId),action,...loc, deviceId: getDeviceId(), deviceName: getDeviceName(), biometricVerified: true})});
     const data=await r.json();
     if(!r.ok)throw new Error(data.error||'تعذر التسجيل.');
     const branchEl = $('branch');const selectedBranchName = branchEl.options[branchEl.selectedIndex]?.text;const branchName = data.branch || data.branch_name || selectedBranchName;
-    const timeOnly = data.time ? data.time.split(' ').pop() : new Date().toLocaleTimeString('ar-EG');
-    show(`${data.message}\nالفرع: ${branchName}\nالوقت: ${data.time}`,true);
+    const timeOnly = cleanTime(data.time || data.created_at || '');
+    show(`${data.message}\nالفرع: ${branchName}\nالوقت: ${timeOnly}`,true);
     if(action==='حضور') setStoredStatus(true,false,timeOnly); else setStoredStatus(false,true,timeOnly);
     $('pin').value='';
   }catch(e){show(e.message||'حدث خطأ.',false); applyButtonsState();}
@@ -221,7 +261,7 @@ async function sendLeave(){
  try{
   const r=await fetch('/api/leave',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code,pin,type,date,reason})});
   const j=await r.json(); if(!r.ok) throw new Error(j.error);
-  show(j.message,true); $('leaveForm').style.display='none'; $('lReason').value='';
+  show(j.message,true); $('lReason').value='';
  }catch(e){ show(e.message,false); }
 }
 async function loadMyAttendance(){
@@ -234,39 +274,41 @@ async function loadMyAttendance(){
   let html=`<table><tr><th>تاريخ</th><th>حضور</th><th>انصراف</th><th>حالة</th></tr>`;
   j.records.forEach(x=>{ html+=`<tr><td>${x.date}</td><td>${x.in}</td><td>${x.out}</td><td>${x.status}</td></tr>`; });
   html+='</table>';
-  $('myLogs').innerHTML=html; $('myLogs').style.display='block';
+  $('myLogs').innerHTML=html;
   show('تم تحميل السجل ✓',true);
  }catch(e){ show(e.message,false); }
 }
+// === نظام الصفحات المنفصلة زي الإدارة - مش بيفتح لتحت ===
+function hideAllPages(){
+  ['page-home','page-attendance','page-leave','page-history','page-profile'].forEach(id=>$(id).classList.add('hidden'));
+}
 function openSection(name){
-  goHomeTabsOnly();
-  document.querySelectorAll('#page-home [id^="section-"]').forEach(el=>el.classList.add('hidden'));
-  const target=document.getElementById('section-'+name);
-  if(target){ target.classList.remove('hidden'); target.scrollIntoView({behavior:'smooth',block:'start'}); }
+  hideAllPages();
+  const map={attendance:'page-attendance',leave:'page-leave',history:'page-history'};
+  const targetId = map[name] || 'page-home';
+  $(targetId).classList.remove('hidden');
+  $('welcomeSub').textContent = name==='attendance' ? 'سجل حضورك أو انصرافك' : name==='leave' ? 'قدم طلب إجازة جديد' : name==='history' ? 'سجل حضورك وغيابك' : 'ما الذي تريد فعله اليوم؟';
+  setActive('home');
+  window.scrollTo({top:0,behavior:'smooth'});
   if(name==='leave'){
     const d=new Date(); d.setDate(d.getDate()+2); const iso=d.toISOString().slice(0,10); const el=$('lDate'); if(el){ el.min=iso; if(!el.value) el.value=iso; }
   }
-  if(name==='history'){ const l=$('myLogs'); if(l) l.style.display='block'; }
 }
 function openProfile(){
-  $('page-home').classList.add('hidden');
+  hideAllPages();
   $('page-profile').classList.remove('hidden');
   updateProfileView();
   setActive('profile');
   window.scrollTo({top:0,behavior:'smooth'});
 }
-function goHome(){ 
-  $('page-profile').classList.add('hidden');
+function goHome(){
+  hideAllPages();
   $('page-home').classList.remove('hidden');
-  document.querySelectorAll('#page-home [id^="section-"]').forEach(el=>el.classList.add('hidden'));
-  setActive('home'); 
-  window.scrollTo({top:0,behavior:'smooth'}); 
-}
-function goHomeTabsOnly(){
-  $('page-profile').classList.add('hidden');
-  $('page-home').classList.remove('hidden');
+  $('welcomeSub').textContent='ما الذي تريد فعله اليوم؟';
   setActive('home');
+  window.scrollTo({top:0,behavior:'smooth'});
 }
+function goHomeTabsOnly(){ goHome(); }
 function setActive(which){
   document.querySelectorAll('.bottomNav .navItem').forEach(el=>el.classList.remove('active'));
   if(which==='home') $('nav-home').classList.add('active');
@@ -278,8 +320,8 @@ function updateProfileView(){
   const br=$('branch'); $('pBranch').textContent=br.options[br.selectedIndex]?.text||'-';
   const s=getStoredStatus();
   const pIn=$('pIn'), pOut=$('pOut');
-  if(s.in){pIn.textContent='تم تسجيل الحضور ✓ الساعة '+s.inTime;pIn.className='value done';} else {pIn.textContent='لم يتم التسجيل';pIn.className='value not';}
-  if(s.out){pOut.textContent='تم تسجيل الانصراف ✓ الساعة '+s.outTime;pOut.className='value done';} else {pOut.textContent='لم يتم التسجيل';pOut.className='value not';}
+  if(s.in){pIn.innerHTML='تم تسجيل الحضور ✓<small>'+escapeHtml(s.inTime)+'</small>';pIn.className='value done';} else {pIn.textContent='لم يتم التسجيل';pIn.className='value not';}
+  if(s.out){pOut.innerHTML='تم تسجيل الانصراف ✓<small>'+escapeHtml(s.outTime)+'</small>';pOut.className='value done';} else {pOut.textContent='لم يتم التسجيل';pOut.className='value not';}
 }
 $('code')?.addEventListener('input', (e)=>{ const v=e.target.value.trim(); $('welcomeName').textContent=v? v : 'موظف'; applyButtonsState(); updateProfileView(); });
 $('branch')?.addEventListener('change', updateProfileView);

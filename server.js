@@ -11,9 +11,9 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const isProd = process.env.NODE_ENV === "production";
 
-// ==== جديد ==== زرار تشغيل / قفل ربط الجهاز
+// ==== زرار تشغيل / قفل ربط الجهاز
 // لو خليته false هيرجع يشتغل بالكود والـ PIN بس زي الاول بالظبط
-const DEVICE_BINDING_ENABLED =true;
+const DEVICE_BINDING_ENABLED = true;
 
 const MAX_RADIUS_M = 200;
 const MAX_GPS_ACCURACY_M = 100;
@@ -110,9 +110,13 @@ async function initDb() {
   await pool.query(`ALTER TABLE employees ADD COLUMN IF NOT EXISTS salary NUMERIC NOT NULL DEFAULT 0;`);
   await pool.query(`ALTER TABLE attendance_logs ADD COLUMN IF NOT EXISTS late_minutes INTEGER NOT NULL DEFAULT 0;`);
   await pool.query(`ALTER TABLE attendance_logs ADD COLUMN IF NOT EXISTS work_hours NUMERIC DEFAULT 0;`);
-  // ==== جديد ==== ربط الجهاز - عمودين بس
   await pool.query(`ALTER TABLE employees ADD COLUMN IF NOT EXISTS device_id TEXT;`);
   await pool.query(`ALTER TABLE employees ADD COLUMN IF NOT EXISTS device_name TEXT;`);
+  await pool.query(`ALTER TABLE attendance_logs ADD COLUMN IF NOT EXISTS device_id TEXT;`);
+  await pool.query(`ALTER TABLE attendance_logs ADD COLUMN IF NOT EXISTS device_name TEXT;`);
+  await pool.query(`ALTER TABLE attendance_logs ADD COLUMN IF NOT EXISTS biometric_verified BOOLEAN NOT NULL DEFAULT FALSE;`);
+  await pool.query(`ALTER TABLE attendance_logs ADD COLUMN IF NOT EXISTS device_bound BOOLEAN NOT NULL DEFAULT FALSE;`);
+  await pool.query(`ALTER TABLE attendance_logs ADD COLUMN IF NOT EXISTS is_first_device BOOLEAN NOT NULL DEFAULT FALSE;`);
 
   const branchesData = [
     {name:"A Market - الاردنيه",lat:30.295282,lng:31.745398},
@@ -265,25 +269,28 @@ app.post("/api/attendance", async (req, res) => {
   try {
     const code = cleanText(req.body.code, 40); const pin = String(req.body.pin || ""); const action = cleanText(req.body.action, 20); const branchId = Number(req.body.branchId);
     const lat = Number(req.body.latitude); const lng = Number(req.body.longitude); const accuracy = Number(req.body.accuracy);
-    // ==== جديد ==== استقبال بصمة الجهاز من الموبايل
-    const deviceId = cleanText(req.body.deviceId, 200);
-    const deviceName = cleanText(req.body.deviceName, 100);
+    const deviceId = cleanText(req.body.deviceId || req.body.device_id, 200);
+    const deviceName = cleanText(req.body.deviceName || req.body.device_name, 200);
+    // ✅ إصلاح البصمة: اقبل كل الصيغ اللي ممكن يبعتها الموبايل
+    const biometricVerified = req.body.biometricVerified === true || req.body.biometric_verified === true || req.body.biometricVerified === "true" || req.body.biometric_verified === "true" || req.body.biometricVerified === 1 || req.body.biometric_verified === 1;
     if (!code || !pin || !Number.isInteger(branchId) || branchId <= 0 || !["حضور", "انصراف"].includes(action)) return res.status(400).json({ error: "راجع بيانات الموظف والفرع ونوع التسجيل" });
     if (!validCoordinates(lat, lng)) return res.status(400).json({ error: "إحداثيات GPS غير صحيحة. فعّل الموقع وحاول مرة أخرى." });
     if (!Number.isFinite(accuracy) || accuracy < 0 || accuracy > MAX_GPS_ACCURACY_M) return res.status(400).json({ error: "دقة الموقع ضعيفة. افتح GPS وحاول مرة أخرى." });
-    // ==== جديد ==== لو ربط الجهاز شغال لازم يبعت deviceId
     if (DEVICE_BINDING_ENABLED && !deviceId) return res.status(400).json({ error: "جهازك مش متعرف عليه. افتح الصفحة من جديد وحاول تاني." });
-    const er = await pool.query(`SELECT id, name, pin_hash, device_id FROM employees WHERE code = $1 AND active = true`, [code]);
+    const er = await pool.query(`SELECT id, name, pin_hash, device_id, device_name FROM employees WHERE code = $1 AND active = true`, [code]);
     if (!er.rowCount || !(await bcrypt.compare(pin, er.rows[0].pin_hash))) return res.status(401).json({ error: "كود الموظف أو الرقم السري غير صحيح." });
-    // ==== جديد ==== منطق ربط الجهاز
+    let isFirstDevice = false;
+    let deviceBound = false;
     if (DEVICE_BINDING_ENABLED) {
       const savedDeviceId = er.rows[0].device_id;
       if (!savedDeviceId) {
-        // اول مرة - اربط الجهاز ده بالموظف
         await pool.query(`UPDATE employees SET device_id=$1, device_name=$2 WHERE id=$3`, [deviceId, deviceName || "موبايل الموظف", er.rows[0].id]);
+        isFirstDevice = true;
+        deviceBound = true;
       } else if (savedDeviceId !== deviceId) {
-        // موبايل تاني - ارفض
         return res.status(403).json({ error: "ده مش موبايلك المسجل. مينفعش تبصم من جهاز تاني. كلم الإدارة تفك ربط الجهاز القديم." });
+      } else {
+        deviceBound = true;
       }
     }
     const br = await pool.query(`SELECT id, name, latitude, longitude, radius_m FROM branches WHERE id = $1 AND active = true`, [branchId]);
@@ -304,18 +311,20 @@ app.post("/api/attendance", async (req, res) => {
       const attTime = todayCheck.rows.find(x => x.action_type === "حضور");
       if (attTime) { const diffMs = new Date() - new Date(attTime.created_at); workHours = parseFloat((diffMs / 1000 / 60 / 60).toFixed(2)); }
     }
-    const saved = await pool.query(`INSERT INTO attendance_logs (employee_id, branch_id, action_type, latitude, longitude, accuracy_m, distance_m, late_minutes, work_hours) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING created_at`, [employee.id, branch.id, action, lat, lng, accuracy, Math.round(dist), lateMinutes, workHours]);
+    const saved = await pool.query(`INSERT INTO attendance_logs (employee_id, branch_id, action_type, latitude, longitude, accuracy_m, distance_m, late_minutes, work_hours, device_id, device_name, biometric_verified, device_bound, is_first_device) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING created_at`, [employee.id, branch.id, action, lat, lng, accuracy, Math.round(dist), lateMinutes, workHours, deviceId || null, deviceName || null, biometricVerified, deviceBound, isFirstDevice]);
     const when = new Date(saved.rows[0].created_at).toLocaleString("ar-EG", { timeZone: "Africa/Cairo" });
     let msg = `تسجيل ${action}\n${employee.name} (${code})\n${branch.name}\nالمسافة: ${Math.round(dist)} متر\n`;
+    msg += biometricVerified ? `البصمة: ✅ تم التأكيد\n` : `البصمة: ❌ مش مؤكدة\n`;
+    msg += `الجهاز: ${deviceName || "غير معروف"}\n`;
+    if (isFirstDevice) msg += `ربط جديد: أول مرة من الجهاز ده\n`;
     if (action === "حضور" && lateMinutes > 0) msg += `متأخر: ${lateMinutes} دقيقة\n`;
     if (action === "انصراف") msg += `ساعات العمل: ${workHours} ساعة\n`;
     msg += when;
     await sendTelegram(msg);
-    return res.json({ ok: true, message: `تم تسجيل ${action} بنجاح.` + (lateMinutes > 0 ? ` متأخر ${lateMinutes} دقيقة.` : ''), time: when, branch: branch.name, branch_name: branch.name, branchName: branch.name, autoUpdated: false, lateMinutes, workHours });
+    return res.json({ ok: true, message: `تم تسجيل ${action} بنجاح.` + (lateMinutes > 0 ? ` متأخر ${lateMinutes} دقيقة.` : ''), time: when, branch: branch.name, branch_name: branch.name, branchName: branch.name, autoUpdated: false, lateMinutes, workHours, biometricVerified, deviceBound, isFirstDevice });
   } catch (e) { console.error("Attendance error:", e); return res.status(500).json({ error: "حصل خطأ داخلي أثناء تسجيل البصمة." }); }
 });
 
-// ==================== APIs لوحة الموظف - 3 زراير ====================
 app.post("/api/leave", async (req, res) => {
   try {
     const code = cleanText(req.body.code, 40); const pin = String(req.body.pin || "");
@@ -324,7 +333,6 @@ app.post("/api/leave", async (req, res) => {
     if (!code || !pin || !type || !leaveDate || !reason) return res.status(400).json({ error: "أكمل بيانات الإجازة" });
     const er = await pool.query(`SELECT id, name, pin_hash FROM employees WHERE code = $1 AND active = true`, [code]);
     if (!er.rowCount || !(await bcrypt.compare(pin, er.rows[0].pin_hash))) return res.status(401).json({ error: "كود الموظف أو الرقم السري غير صحيح." });
-    // === قانون اليومين - لازم يطلب قبلها بيومين ===
     const nowCairoStr = new Date().toLocaleString("en-US", { timeZone: "Africa/Cairo" });
     const todayCairo = new Date(nowCairoStr);
     todayCairo.setHours(0,0,0,0);
@@ -367,7 +375,6 @@ app.get("/api/my-attendance", async (req, res) => {
   } catch (e) { console.error("my-attendance error:", e); res.status(500).json({ error: "تعذر تحميل السجل" }); }
 });
 
-// ==================== APIs إدارة الإجازات - جديد ====================
 app.get("/api/admin/leaves", requireAdmin, async (_req, res) => {
   try {
     const r = await pool.query(`SELECT l.id, e.code, e.name AS employee, l.type, l.leave_date, l.reason, l.status, l.created_at FROM leave_requests l JOIN employees e ON e.id = l.employee_id ORDER BY l.created_at DESC LIMIT 500`);
@@ -403,7 +410,7 @@ app.get("/api/admin/logs", requireAdmin, async (req, res) => {
     if (/^\d{4}-\d{2}-\d{2}$/.test(from)) { params.push(from); conditions.push(`(l.created_at AT TIME ZONE 'Africa/Cairo')::date >= $${params.length}::date`); }
     if (/^\d{4}-\d{2}-\d{2}$/.test(to)) { params.push(to); conditions.push(`(l.created_at AT TIME ZONE 'Africa/Cairo')::date <= $${params.length}::date`); }
     const where = conditions.length ? "WHERE " + conditions.join(" AND ") : "";
-    const r = await pool.query(`SELECT l.id, e.code, e.name AS employee, b.name AS branch, l.action_type, l.created_at, l.latitude, l.longitude, l.accuracy_m, l.distance_m, l.late_minutes, l.work_hours FROM attendance_logs l JOIN employees e ON e.id = l.employee_id JOIN branches b ON b.id = l.branch_id ${where} ORDER BY l.created_at DESC LIMIT 5000`, params);
+    const r = await pool.query(`SELECT l.id, e.code, e.name AS employee, b.name AS branch, l.action_type, l.created_at, l.latitude, l.longitude, l.accuracy_m, l.distance_m, l.late_minutes, l.work_hours, l.device_id, l.device_name, l.biometric_verified, l.device_bound, l.is_first_device, e.device_id AS employee_device_id, e.device_name AS employee_device_name FROM attendance_logs l JOIN employees e ON e.id = l.employee_id JOIN branches b ON b.id = l.branch_id ${where} ORDER BY l.created_at DESC LIMIT 5000`, params);
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: "تعذر تحميل سجل البصمات" }); }
 });
@@ -453,9 +460,8 @@ app.post("/api/admin/employees/:id/pin", requireAdmin, async (req, res) => {
   } catch (e) { res.status(500).json({ error: "تعذر تغيير الرقم السري" }); }
 });
 
-// ==== جديد ==== فك ربط جهاز موظف - للادمن بس
-// لما موبايل الموظف يبوظ او يتغير، دوس الزرار ده من لوحة الادمن
-app.post("/api/admin/employees/:id/unbind-device", requireAdmin, async (req, res) => {
+// ==== فك ربط جهاز موظف - للادمن بس ====
+async function unbindDeviceHandler(req, res) {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "بيانات الموظف غير صحيحة." });
@@ -463,7 +469,10 @@ app.post("/api/admin/employees/:id/unbind-device", requireAdmin, async (req, res
     if (!r.rowCount) return res.status(404).json({ error: "الموظف غير موجود." });
     res.json({ ok: true, message: "تم فك ربط الجهاز. الموظف يقدر يربط موبايل جديد في اول بصمة جاية." });
   } catch (e) { res.status(500).json({ error: "تعذر فك ربط الجهاز" }); }
-});
+}
+app.post("/api/admin/employees/:id/unbind-device", requireAdmin, unbindDeviceHandler);
+// ✅ اسم بديل عشان لو أي زرار قديم نادى عليه يشتغل برضه
+app.post("/api/admin/employees/:id/reset-device", requireAdmin, unbindDeviceHandler);
 
 app.get("/api/admin/reports/monthly", requireAdmin, async (req, res) => {
   try {
@@ -536,27 +545,48 @@ app.post("/api/admin/branches", requireAdmin, async (req, res) => {
   } catch (e) { res.status(400).json({ error: "تعذر إضافة الفرع. ربما الاسم مستخدم بالفعل." }); }
 });
 
+// ✅✅ إصلاح التصدير: بيقرا من attendance_logs الصح، مش من جدول attendance الفاضي
 app.get("/api/admin/export.csv", requireAdmin, async (_req, res) => {
   try {
-    await pool.query(`CREATE TABLE IF NOT EXISTS attendance (
-      id SERIAL PRIMARY KEY,
-      employee_id INT REFERENCES employees(id) ON DELETE CASCADE,
-      branch_id INT REFERENCES branches(id),
-      time TIMESTAMP DEFAULT NOW(),
-      type TEXT
-    )`);
-    const r = await pool.query(`SELECT e.code, e.name, a.time, a.type, b.name as branch FROM attendance a JOIN employees e ON e.id=a.employee_id LEFT JOIN branches b ON b.id=a.branch_id ORDER BY a.time DESC`);
-    if(!r.rows.length) return res.status(404).send("مفيش بيانات لسه");
+    const r = await pool.query(`
+      SELECT e.code AS code, e.name AS name, b.name AS branch,
+        l.action_type AS type,
+        to_char(l.created_at AT TIME ZONE 'Africa/Cairo', 'YYYY-MM-DD HH24:MI:SS') AS time,
+        ROUND(COALESCE(l.distance_m,0)) AS distance_m,
+        COALESCE(l.late_minutes,0) AS late_minutes,
+        COALESCE(l.work_hours,0) AS work_hours,
+        CASE WHEN l.biometric_verified THEN 'نعم - بصمة ✅' ELSE 'لا - بدون بصمة' END AS biometric,
+        COALESCE(l.device_name, e.device_name, '') AS device_name,
+        COALESCE(l.device_id, e.device_id, '') AS device_id,
+        CASE WHEN l.device_bound THEN 'مربوط' ELSE 'غير مربوط' END AS device_bound,
+        CASE WHEN l.is_first_device THEN 'نعم - أول ربط' ELSE 'لا' END AS is_first_device
+      FROM attendance_logs l
+      JOIN employees e ON e.id = l.employee_id
+      LEFT JOIN branches b ON b.id = l.branch_id
+      ORDER BY l.created_at DESC
+    `);
+    if(!r.rows.length) return res.status(404).send("مفيش بيانات لسه - مفيش بصمات متسجلة في attendance_logs");
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('الحضور');
     sheet.columns = [
-      { header: 'كود الموظف', key: 'code', width: 20 },
-      { header: 'اسم الموظف', key: 'name', width: 25 },
-      { header: 'الوقت', key: 'time', width: 25 },
-      { header: 'النوع', key: 'type', width: 15 },
-      { header: 'الفرع', key: 'branch', width: 20 },
+      { header: 'كود الموظف', key: 'code', width: 16 },
+      { header: 'اسم الموظف', key: 'name', width: 28 },
+      { header: 'الفرع', key: 'branch', width: 30 },
+      { header: 'الحركة', key: 'type', width: 12 },
+      { header: 'الوقت (القاهرة)', key: 'time', width: 22 },
+      { header: 'المسافة (م)', key: 'distance_m', width: 14 },
+      { header: 'تأخير (د)', key: 'late_minutes', width: 12 },
+      { header: 'ساعات العمل', key: 'work_hours', width: 14 },
+      { header: 'البصمة', key: 'biometric', width: 18 },
+      { header: 'نوع الجهاز', key: 'device_name', width: 42 },
+      { header: 'معرف الجهاز', key: 'device_id', width: 30 },
+      { header: 'حالة الربط', key: 'device_bound', width: 14 },
+      { header: 'أول ربط؟', key: 'is_first_device', width: 16 },
     ];
     sheet.addRows(r.rows);
+    // تنسيق العناوين
+    sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F2A4A' } };
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename=furqan-attendance.xlsx');
     await workbook.xlsx.write(res);
